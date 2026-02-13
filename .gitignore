@@ -1,0 +1,22 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# 模型与构建产物（llama.cpp 需单独 clone，见 README）
+models/
+llama.cpp/
+
+# 隐私与密钥（切勿提交）
+.api-key
+api-keys.txt
+*.api-keys
+.env
+.env.*
+*.key
+*.pem
+
+# 其他
+archives/
+*.log
+.DS_Store

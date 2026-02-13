@@ -1,0 +1,6 @@
+# GLM-5 部署项目 Python 依赖
+# 用于模型下载和 OpenAI API 测试
+
+huggingface_hub>=0.20.0
+hf_transfer>=0.1.0
+openai>=1.0.0

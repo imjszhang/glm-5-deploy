@@ -23,28 +23,31 @@
         .nav { margin-bottom: 1rem; }
         .nav a { color: var(--muted); text-decoration: none; margin-right: 1rem; }
         .nav a:hover { color: var(--text); }
-        .slot { padding: 0.5rem; background: #27272a; border-radius: 0.25rem; margin-bottom: 0.25rem; font-size: 0.875rem; }
-        .slot.busy { border-left: 3px solid var(--accent); }
+        .slot { padding: 0.5rem; background: #27272a; border-radius: 0.25rem; margin-bottom: 0.5rem; font-size: 0.875rem; }
+        .slot.busy { border-left: 3px solid var(--accent); animation: pulse 2s ease-in-out infinite; }
+        @keyframes pulse { 0%, 100% { border-left-color: var(--accent); } 50% { border-left-color: #16a34a; } }
+        .slot-header { display: flex; justify-content: space-between; align-items: center; }
+        .slot-progress { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; font-family: ui-monospace, monospace; }
+        .slot-hint { color: var(--warn); }
+        .slot-generated { margin-top: 0.5rem; padding: 0.5rem; background: #1a1a1f; border-radius: 0.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.4; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--text); border: 1px solid #333; }
+        .slot-thinking { margin-top: 0.5rem; padding: 0.5rem; background: #1e1e24; border-radius: 0.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.4; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--muted); border-left: 3px solid #6366f1; }
+        .slot-thinking-title { font-size: 0.7rem; color: #6366f1; margin-bottom: 0.25rem; text-transform: uppercase; }
+        .slot-muted { color: var(--muted); }
         .error { color: #ef4444; font-size: 0.875rem; }
         .refresh { color: var(--muted); font-size: 0.75rem; margin-top: 0.5rem; }
     </style>
 </head>
 <body>
-    <nav class="nav">
-        <a href="/">← 聊天</a>
-    </nav>
     <h1>GLM-5 监控</h1>
 
     <div class="card">
         <h2>配置</h2>
         <div class="api-row">
-            <input type="text" id="apiBase" placeholder="API 地址，如 http://127.0.0.1:8001" style="margin-bottom:0.5rem">
+            <input type="text" id="apiBase" placeholder="默认 /api 使用代理（自动读取 .api-key）">
+            <button onclick="localStorage.setItem('glm5_api_base', document.getElementById('apiBase').value.trim() || '/api'); fetchAll()">保存</button>
+            <button onclick="localStorage.removeItem('glm5_api_base'); location.reload()" style="background:var(--muted)">清除缓存</button>
         </div>
-        <div class="api-row">
-            <input type="password" id="apiKey" placeholder="若启用认证请填入 .api-key 中的密钥">
-            <button onclick="saveKey()">保存</button>
-        </div>
-        <p class="refresh">API 地址存于 localStorage；密钥仅存于当前会话</p>
+        <p class="refresh">默认 /api 经本服务代理，自动认证。若数据为空请点「清除缓存」后强制刷新 (Cmd+Shift+R)</p>
     </div>
 
     <div class="card">
@@ -68,27 +71,32 @@
     <p class="refresh" id="lastUpdate">-</p>
 
     <script>
-        function getKey() {
-            return sessionStorage.getItem('glm5_api_key') || '';
+        function escapeHtml(str) {
+            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
         }
-        function saveKey() {
-            const base = document.getElementById('apiBase').value.trim();
-            if (base) localStorage.setItem('glm5_api_base', base);
-            sessionStorage.setItem('glm5_api_key', document.getElementById('apiKey').value);
+        // 从生成文本中解析 <think>...</think> 思考内容
+        function parseThinkingAndContent(gen) {
+            const thinkMatch = gen.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+            const thinking = thinkMatch ? thinkMatch[1].trim() : '';
+            const afterThink = thinkMatch ? gen.slice(gen.indexOf(thinkMatch[0]) + thinkMatch[0].length) : gen;
+            const content = afterThink.replace(/^[\s\n]+/, '').trim();
+            return { thinking, content };
         }
 
+        let hasProcessing = false;
+        let pollTimer = null;
+        const POLL_FAST = 1500;
+        const POLL_IDLE = 5000;
+
         function headers() {
-            const key = getKey();
-            const h = { 'Accept': 'application/json, text/plain' };
-            if (key) h['Authorization'] = `Bearer ${key}`;
-            return h;
+            return { 'Accept': 'application/json, text/plain' };
         }
 
         function parseMetrics(text) {
             const m = {};
             for (const line of text.split('\n')) {
                 if (line.startsWith('llamacpp:')) {
-                    const match = line.match(/^(llamacpp:[^\s]+)\s+([\d.e+-]+)/);
+                    const match = line.match(/^(llamacpp:[^\s{]+)\s*(?:\{[^}]*\})?\s+([\d.e+-]+)/);
                     if (match) m[match[1]] = parseFloat(match[2]);
                 }
             }
@@ -100,26 +108,63 @@
             'llamacpp:tokens_predicted_total': '生成 Tokens',
             'llamacpp:prompt_tokens_seconds': 'Prompt 吞吐 (tokens/s)',
             'llamacpp:predicted_tokens_seconds': '生成吞吐 (tokens/s)',
+            'llamacpp:prompt_seconds_total': 'Prompt 总耗时 (s)',
+            'llamacpp:tokens_predicted_seconds_total': '生成总耗时 (s)',
+            'llamacpp:n_decode_total': '解码总次数',
             'llamacpp:requests_processing': '处理中请求',
             'llamacpp:requests_deferred': '排队请求',
+            'llamacpp:n_busy_slots_per_decode': '忙碌槽位/解码',
             'llamacpp:n_tokens_max': '最大上下文',
-            'llamacpp:kv_cache_usage_ratio': 'KV 缓存使用率',
         };
 
-        async function fetchAll() {
-            const apiBase = localStorage.getItem('glm5_api_base') || 'http://127.0.0.1:8001';
-            document.getElementById('apiBase').value = apiBase;
-            document.getElementById('apiKey').value = getKey();
-            try {
-                const [healthRes, metricsRes, slotsRes] = await Promise.all([
-                    fetch(apiBase + '/health', { headers: headers() }),
-                    fetch(apiBase + '/metrics', { headers: headers() }),
-                    fetch(apiBase + '/slots', { headers: headers() })
-                ]);
+        function apiUrl(path) {
+            let base = localStorage.getItem('glm5_api_base') || '/api';
+            if (base.includes('8001') || base.includes(':8001')) {
+                base = '/api';
+                localStorage.setItem('glm5_api_base', base);
+            }
+            if (base.startsWith('http')) return base.replace(/\/$/, '') + path;
+            const origin = window.location.origin || 'http://localhost:8888';
+            return origin + (base.startsWith('/') ? base : '/' + base) + path;
+        }
 
+        function fetchWithTimeout(url, opts, ms = 30000) {
+            const ctrl = new AbortController();
+            const timer = setTimeout(() => ctrl.abort(), ms);
+            return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
+        }
+
+        function errMsg(e) {
+            return e.name === 'AbortError' ? '请求超时 (30s)' : e.message;
+        }
+
+        async function fetchAll() {
+            const base = localStorage.getItem('glm5_api_base') || '/api';
+            if (base.includes('8001') || base.includes(':8001')) {
+                localStorage.setItem('glm5_api_base', '/api');
+            }
+            document.getElementById('apiBase').value = base.includes('8001') ? '/api' : base;
+
+            // 独立请求：单个端点失败不影响其他
+            const [healthResult, metricsResult, slotsResult] = await Promise.allSettled([
+                fetchWithTimeout(apiUrl('/health'), { headers: headers() }),
+                fetchWithTimeout(apiUrl('/metrics'), { headers: headers() }),
+                fetchWithTimeout(apiUrl('/slots'), { headers: headers() })
+            ]);
+
+            // 健康状态
+            if (healthResult.status === 'fulfilled') {
+                const healthRes = healthResult.value;
                 document.getElementById('healthDot').className = 'status ' + (healthRes.ok ? 'ok' : 'err');
                 document.getElementById('healthText').textContent = healthRes.ok ? '正常' : `错误 ${healthRes.status}`;
+            } else {
+                document.getElementById('healthDot').className = 'status err';
+                document.getElementById('healthText').textContent = errMsg(healthResult.reason);
+            }
 
+            // 推理指标
+            if (metricsResult.status === 'fulfilled') {
+                const metricsRes = metricsResult.value;
                 if (metricsRes.ok) {
                     const text = await metricsRes.text();
                     const m = parseMetrics(text);
@@ -128,28 +173,91 @@
                         .map(([k, label]) => `<div class="metric"><span>${label}</span><span>${typeof m[k] === 'number' && m[k] % 1 ? m[k].toFixed(2) : m[k]}</span></div>`)
                         .join('') || '<div class="metric"><span>无数据</span></div>';
                 } else {
-                    document.getElementById('metrics').innerHTML = `<div class="error">${metricsRes.status === 401 ? '需认证：请填入 API Key' : '获取失败'}</div>`;
+                    document.getElementById('metrics').innerHTML = `<div class="error">${metricsRes.status === 401 ? '需认证' : '获取失败'} (${metricsRes.status})</div>`;
                 }
+            } else {
+                document.getElementById('metrics').innerHTML = `<div class="error">${errMsg(metricsResult.reason)}</div>`;
+            }
 
+            // 槽位状态
+            if (slotsResult.status === 'fulfilled') {
+                const slotsRes = slotsResult.value;
                 if (slotsRes.ok) {
-                    const slots = await slotsRes.json();
-                    document.getElementById('slots').innerHTML = Array.isArray(slots)
-                        ? slots.map(s => `<div class="slot ${s.is_processing ? 'busy' : ''}">#${s.id} ${s.is_processing ? '处理中' : '空闲'} ${s.params?.n_predict !== undefined ? `max=${s.params.n_predict}` : ''}</div>`).join('')
-                        : '<div class="metric"><span>无槽位数据</span></div>';
+                    try {
+                        const slots = await slotsRes.json();
+                        if (Array.isArray(slots)) {
+                            hasProcessing = slots.some(s => s.is_processing);
+                            document.getElementById('slots').innerHTML = slots.map(s => {
+                                if (!s.is_processing) {
+                                    return `<div class="slot"><span class="slot-header">#${s.id} 空闲</span></div>`;
+                                }
+                                const nt = Array.isArray(s.next_token) ? s.next_token[0] : (s.next_token || {});
+                                const decoded = nt.n_decoded ?? '?';
+                                const remain = nt.n_remain ?? '?';
+                                const maxP = s.params?.n_predict;
+                                let progress = `已生成 ${decoded} tokens`;
+                                if (remain !== '?' && remain >= 0) progress += ` / 剩余 ${remain}`;
+                                if (maxP !== undefined) progress += ` (max=${maxP})`;
+                                const gen = (s.generated ?? s.generated_text ?? s.output ?? s.content ?? '') || '';
+                                const reasoning = (s.reasoning ?? s.reasoning_content ?? '') || '';
+                                let genHtml;
+                                if (gen || reasoning) {
+                                    const { thinking, content } = parseThinkingAndContent(gen);
+                                    const showThinking = reasoning || thinking;
+                                    const showContent = content || (!showThinking && gen);
+                                    const parts = [];
+                                    if (showThinking) {
+                                        parts.push(`<div class="slot-thinking"><div class="slot-thinking-title">思考</div>${escapeHtml(reasoning || thinking)}</div>`);
+                                    }
+                                    if (showContent) {
+                                        parts.push(`<div class="slot-generated">${escapeHtml(content || gen)}</div>`);
+                                    } else if (showThinking) {
+                                        parts.push(`<div class="slot-generated slot-muted">回复生成中...</div>`);
+                                    }
+                                    genHtml = parts.join('');
+                                } else if (decoded !== '?' && decoded > 0) {
+                                    genHtml = `<div class="slot-progress slot-hint">需启用 slots_debug 才能查看生成内容。请用 deploy.sh 重启服务（已设置 LLAMA_SERVER_SLOTS_DEBUG=1）</div>`;
+                                } else {
+                                    genHtml = `<div class="slot-progress">等待生成...</div>`;
+                                }
+                                return `<div class="slot busy"><div class="slot-header"><span>#${s.id} 处理中</span></div><div class="slot-progress">${progress}</div>${genHtml}</div>`;
+                            }).join('');
+                        } else {
+                            document.getElementById('slots').innerHTML = '<div class="metric"><span>无槽位数据</span></div>';
+                        }
+                    } catch (e) {
+                        document.getElementById('slots').innerHTML = `<div class="error">解析失败: ${e.message}</div>`;
+                    }
                 } else {
-                    document.getElementById('slots').innerHTML = `<div class="error">获取失败</div>`;
+                    document.getElementById('slots').innerHTML = `<div class="error">获取失败 (${slotsRes.status})</div>`;
                 }
-            } catch (e) {
-                document.getElementById('healthDot').className = 'status err';
-                document.getElementById('healthText').textContent = '连接失败';
-                document.getElementById('metrics').innerHTML = `<div class="error">${e.message}</div>`;
-                document.getElementById('slots').innerHTML = '';
+            } else {
+                document.getElementById('slots').innerHTML = `<div class="error">${errMsg(slotsResult.reason)}</div>`;
             }
             document.getElementById('lastUpdate').textContent = `上次更新: ${new Date().toLocaleTimeString('zh-CN')}`;
+
+            // 自动滚动生成内容区和思考区到底部
+            document.querySelectorAll('.slot-generated, .slot-thinking').forEach(el => { el.scrollTop = el.scrollHeight; });
+
+            // 自适应轮询：有槽位处理中时 1.5s，全部空闲时 5s
+            schedulePoll();
         }
 
+        function schedulePoll() {
+            if (pollTimer) clearTimeout(pollTimer);
+            if (document.hidden) return;
+            pollTimer = setTimeout(fetchAll, hasProcessing ? POLL_FAST : POLL_IDLE);
+        }
+
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
+            } else {
+                fetchAll();
+            }
+        });
+
         fetchAll();
-        setInterval(fetchAll, 5000);
     </script>
 </body>
 </html>

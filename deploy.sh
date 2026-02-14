@@ -190,6 +190,7 @@ LLAMA_ARGS=(
     --port "$PORT"
     --jinja
     --metrics
+    --slots
     --reasoning-budget -1
 )
 if [ -n "$API_KEY" ]; then
@@ -197,6 +198,11 @@ if [ -n "$API_KEY" ]; then
 elif [ -n "$API_KEY_FILE" ]; then
     LLAMA_ARGS+=(--api-key-file "$API_KEY_FILE")
 fi
+# 启用 slots_debug：/slots 端点将返回每个槽位的 prompt 和 generated 文本，
+# 供监控页实时查看生成内容。注意：这会暴露用户的输入和输出文本，
+# 仅建议在受信任网络中使用。
+export LLAMA_SERVER_SLOTS_DEBUG=1
+
 nohup "$CPP_DIR/build/bin/llama-server" "${LLAMA_ARGS[@]}" > "$LOG_FILE" 2>&1 &
 
 echo "   等待服务启动（模型加载需数分钟）..."

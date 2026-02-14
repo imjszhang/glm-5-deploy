@@ -174,17 +174,23 @@ sleep 3
 
 # 启动 llama-server
 echo -e "${YELLOW}[2/3] 启动 llama-server...${NC}"
+# Unsloth Default Settings (Most Tasks): temp=1.0, top_p=0.95, max_new_tokens=131072,
+# repeat_penalty=1.0(disabled), ctx=202752, --jinja. 思考模式默认启用。
+# 若内存不足可减小 --ctx-size（如 16384）。
 LLAMA_ARGS=(
     --model "$MODEL_FILE"
     --alias "unsloth/GLM-5"
     --fit on
     --temp 1.0
     --top-p 0.95
-    --ctx-size 16384
+    --ctx-size 202752
+    --n-predict 131072
+    --repeat-penalty 1.0
     --host "$HOST"
     --port "$PORT"
     --jinja
     --metrics
+    --reasoning-budget -1
 )
 if [ -n "$API_KEY" ]; then
     LLAMA_ARGS+=(--api-key "$API_KEY")

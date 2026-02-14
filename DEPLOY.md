@@ -249,7 +249,23 @@ tail -f /tmp/glm5_server.log
 |--------|----------|
 | 默认端口 | 8001 |
 | 模型路径 | `models/GLM-5-GGUF/UD-IQ2_XXS/*.gguf` |
-| 推荐参数 | `--temp 1.0` `--top-p 0.95` `--ctx-size 16384` `--jinja` `--fit on` |
-| 最大上下文 | 202752 |
+| 推荐参数 | 按 Unsloth Default (Most Tasks) 见下表 |
 | 认证 | `--api-key KEY` 或 `--api-key-file PATH` |
 | 局域网访问 | `--host 0.0.0.0` 或 `--lan` |
+
+### Unsloth 推荐配置
+
+| 场景 | temperature | top_p | max new tokens | repeat penalty |
+|------|-------------|-------|----------------|-----------------|
+| Default (Most Tasks) | 1.0 | 0.95 | 131072 | 1.0 (disabled) |
+| SWE Bench Verified | 0.7 | 1.0 | 16384 | 1.0 (disabled) |
+
+- 使用 `--jinja`
+- 最大上下文窗口：202752
+- 多轮 agent 任务（τ²-Bench、Terminal Bench 2）建议开启 Preserved Thinking 模式（`--reasoning-budget -1`）
+
+### 思考模式
+
+- **默认启用**：`--reasoning-budget -1`
+- **关闭**：`--reasoning-budget 0`，或单次请求传入 `"chat_template_kwargs": {"enable_thinking": false}`
+<｜tool▁calls▁begin｜><｜tool▁call▁begin｜>

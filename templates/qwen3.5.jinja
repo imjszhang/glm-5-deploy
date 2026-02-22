@@ -51,7 +51,7 @@
     {%- endfor %}
     {{- "\n</tools>" }}
     {{- '\n\nIf you choose to call a function ONLY reply in the following format with NO suffix:\n\n<tool_call>\n<function=example_function_name>\n<parameter=example_parameter_1>\nvalue_1\n</parameter>\n<parameter=example_parameter_2>\nThis is the value for the second parameter\nthat can span\nmultiple lines\n</parameter>\n</function>\n</tool_call>\n\n<IMPORTANT>\nReminder:\n- Function calls MUST follow the specified format: an inner <function=...></function> block must be nested within <tool_call></tool_call> XML tags\n- Required parameters MUST be specified\n- You may provide optional reasoning for your function call in natural language BEFORE the function call, but NOT after\n- If there is no function call available, answer the question like normal with your current knowledge and do not tell the user about function calls\n</IMPORTANT>' }}
-    {%- if messages[0].role == 'system' %}
+    {%- if messages[0].role in ['system', 'developer'] %}
         {%- set content = render_content(messages[0].content, false, true)|trim %}
         {%- if content %}
             {{- '\n\n' + content }}
@@ -59,7 +59,7 @@
     {%- endif %}
     {{- '<|im_end|>\n' }}
 {%- else %}
-    {%- if messages[0].role == 'system' %}
+    {%- if messages[0].role in ['system', 'developer'] %}
         {%- set content = render_content(messages[0].content, false, true)|trim %}
         {{- '<|im_start|>system\n' + content + '<|im_end|>\n' }}
     {%- endif %}
@@ -80,7 +80,7 @@
 {%- endif %}
 {%- for message in messages %}
     {%- set content = render_content(message.content, true)|trim %}
-    {%- if message.role == "system" %}
+    {%- if message.role in ["system", "developer"] %}
         {%- if not loop.first %}
             {{- raise_exception('System message must be at the beginning.') }}
         {%- endif %}
@@ -133,20 +133,66 @@
             {%- endfor %}
         {%- endif %}
         {{- '<|im_end|>\n' }}
-    {%- elif message.role == "tool" %}
-        {%- if loop.previtem and loop.previtem.role != "tool" %}
+    {%- elif message.role == "tool" or message.role == "function" %}
+        {%- if not loop.previtem or loop.previtem.role not in ["tool", "function"] %}
             {{- '<|im_start|>user' }}
         {%- endif %}
         {{- '\n<tool_response>\n' }}
         {{- content }}
         {{- '\n</tool_response>' }}
-        {%- if not loop.last and loop.nextitem.role != "tool" %}
+        {%- if not loop.last and (not loop.nextitem or loop.nextitem.role not in ["tool", "function"]) %}
             {{- '<|im_end|>\n' }}
         {%- elif loop.last %}
             {{- '<|im_end|>\n' }}
         {%- endif %}
+    {%- elif message.role == "model" %}
+        {#- Anthropic 风格: model 视为 assistant，输出格式相同 -#}
+        {%- set reasoning_content = '' %}
+        {%- if message.reasoning_content is defined and message.reasoning_content is string %}
+            {%- set reasoning_content = message.reasoning_content %}
+        {%- elif '</think>' in content %}
+            {%- set reasoning_content = content.split('</think>')[0].rstrip('\n').split('<think>')[-1].lstrip('\n') %}
+            {%- set content = content.split('</think>')[-1].lstrip('\n') %}
+        {%- endif %}
+        {%- set reasoning_content = reasoning_content|trim %}
+        {%- if loop.index0 > ns.last_query_index and reasoning_content %}
+            {{- '<|im_start|>assistant\n<think>\n' + reasoning_content + '\n</think>\n\n' + content }}
+        {%- else %}
+            {{- '<|im_start|>assistant\n' + content }}
+        {%- endif %}
+        {%- if message.tool_calls is defined and message.tool_calls is iterable and message.tool_calls is not mapping %}
+            {%- for tool_call in message.tool_calls %}
+                {%- if tool_call.function is defined %}
+                    {%- set tool_call = tool_call.function %}
+                {%- endif %}
+                {%- if loop.first %}
+                    {%- if content|trim %}
+                        {{- '\n\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                    {%- else %}
+                        {{- '<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                    {%- endif %}
+                {%- else %}
+                    {{- '\n<tool_call>\n<function=' + tool_call.name + '>\n' }}
+                {%- endif %}
+                {%- if tool_call.arguments is defined %}
+                    {%- if tool_call.arguments is string %}
+                        {{- tool_call.arguments }}
+                        {{- '\n' }}
+                    {%- else %}
+                        {%- for args_name, args_value in tool_call.arguments|items %}
+                            {{- '<parameter=' + args_name + '>\n' }}
+                            {%- set args_value = args_value | tojson | safe if args_value is mapping or (args_value is sequence and args_value is not string) else args_value | string %}
+                            {{- args_value }}
+                            {{- '\n</parameter>\n' }}
+                        {%- endfor %}
+                    {%- endif %}
+                {%- endif %}
+                {{- '</function>\n</tool_call>' }}
+            {%- endfor %}
+        {%- endif %}
+        {{- '<|im_end|>\n' }}
     {%- else %}
-        {{- raise_exception('Unexpected message role.') }}
+        {{- raise_exception('Unexpected message role: ' ~ (message.role | string)) }}
     {%- endif %}
 {%- endfor %}
 {%- if add_generation_prompt %}

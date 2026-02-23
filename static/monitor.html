@@ -39,10 +39,17 @@
         .error { color: #ef4444; font-size: 0.875rem; }
         .refresh { color: var(--muted); font-size: 0.75rem; margin-top: 0.5rem; }
         .model-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem; background: #27272a; color: var(--accent); font-size: 0.75rem; font-family: ui-monospace, monospace; margin-left: 0.5rem; }
+        .queue-badge { display: none; padding: 0.15rem 0.5rem; border-radius: 0.25rem; background: #422006; color: var(--warn); font-size: 0.75rem; font-family: ui-monospace, monospace; margin-left: 0.25rem; }
+        .queue-badge.active { display: inline-block; }
     </style>
 </head>
 <body>
-    <h1>LLM 监控 <span class="model-badge" id="currentModelBadge">-</span></h1>
+    <h1>LLM 监控 <span class="model-badge" id="currentModelBadge">-</span><span class="queue-badge" id="queueBadge"></span></h1>
+
+    <div class="nav">
+        <a href="/monitor.html" class="active">监控</a>
+        <a href="/chat.html">Chat 流式</a>
+    </div>
 
     <div class="card">
         <h2>配置</h2>
@@ -93,6 +100,7 @@
         let pollTimer = null;
         let currentModel = localStorage.getItem('llm_current_model') || '';
         let modelsLoaded = false;
+        let modelsData = [];
         const POLL_FAST = 12000;
         const POLL_IDLE = 10000;
 
@@ -108,6 +116,7 @@
                 const resp = await fetch(origin + '/api/models', { headers: headers() });
                 if (resp.ok) {
                     const models = await resp.json();
+                    modelsData = models;
                     select.innerHTML = '';
                     if (models.length === 0) {
                         select.innerHTML = '<option value="">无运行中的模型</option>';
@@ -137,6 +146,16 @@
 
         function updateModelBadge() {
             document.getElementById('currentModelBadge').textContent = currentModel || '-';
+            const badge = document.getElementById('queueBadge');
+            const m = modelsData.find(x => x.name === currentModel);
+            const depth = m && m.queue ? m.queue : 0;
+            if (depth > 0) {
+                badge.textContent = `排队 ${depth}`;
+                badge.classList.add('active');
+            } else {
+                badge.textContent = '';
+                badge.classList.remove('active');
+            }
         }
 
         function apiUrl(path) {

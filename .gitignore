@@ -20,6 +20,7 @@ api-keys.txt
 # 运行时
 run/
 logs/
+serve-ui-access.jsonl
 
 # 其他
 archives/

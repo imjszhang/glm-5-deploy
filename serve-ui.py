@@ -43,11 +43,74 @@ EMBEDDING_PATHS = frozenset({
 })
 MAX_QUEUE_DEPTH = int(os.environ.get("MAX_QUEUE_DEPTH", "5"))
 QUEUE_KEEPALIVE_SEC = int(os.environ.get("QUEUE_KEEPALIVE_SEC", "5"))
+ACCESS_LOG_FILE = os.environ.get("SERVE_UI_ACCESS_LOG", "").strip() or None
+LOG_BODY = os.environ.get("SERVE_UI_LOG_BODY", "").strip().lower() in ("1", "true", "yes")
+
+_access_log_lock = threading.Lock()
 
 
 def _log(msg):
     sys.stderr.write(f"[serve-ui] {msg}\n")
     sys.stderr.flush()
+
+
+def _parse_body_summary(body, kind="infer"):
+    """从 body 解析摘要字段，不抛异常。kind: 'infer' | 'embed'"""
+    summary = {}
+    if not body:
+        return summary
+    try:
+        data = json.loads(body.decode("utf-8", errors="replace"))
+    except (json.JSONDecodeError, UnicodeDecodeError, TypeError):
+        summary["parse_error"] = True
+        return summary
+    if not isinstance(data, dict):
+        return summary
+    if data.get("model") is not None:
+        summary["model"] = data["model"]
+    if kind == "infer":
+        summary["stream"] = data.get("stream", False)
+        messages = data.get("messages")
+        if isinstance(messages, list):
+            summary["n_messages"] = len(messages)
+        if "max_tokens" in data:
+            summary["max_tokens"] = data["max_tokens"]
+        if "temperature" in data:
+            summary["temperature"] = data["temperature"]
+    else:
+        inp = data.get("input")
+        if isinstance(inp, list):
+            summary["input_count"] = len(inp)
+        elif isinstance(inp, str):
+            summary["input_len"] = len(inp)
+    return summary
+
+
+def _log_request_summary(kind, path, method, client_ip, model_name, body_summary, full_body=None):
+    """记录请求摘要到 stderr，若配置了 ACCESS_LOG_FILE 则追加 JSONL 行。"""
+    ts = time.time()
+    record = {
+        "ts": ts,
+        "path": path,
+        "method": method,
+        "client_ip": client_ip,
+        "model_name": model_name,
+        "body_summary": body_summary,
+    }
+    if full_body is not None and LOG_BODY:
+        record["body"] = full_body
+    parts = [f"[{kind}]", client_ip, "→", model_name, f"path={path}"]
+    for k, v in body_summary.items():
+        parts.append(f"{k}={v}")
+    _log(" ".join(str(p) for p in parts))
+    if ACCESS_LOG_FILE:
+        try:
+            line = json.dumps(record, ensure_ascii=False) + "\n"
+            with _access_log_lock:
+                with open(ACCESS_LOG_FILE, "a", encoding="utf-8") as f:
+                    f.write(line)
+        except OSError as e:
+            _log(f"access_log write failed: {e}")
 
 
 def load_api_key():
@@ -206,6 +269,9 @@ class ProxyHandler(SimpleHTTPRequestHandler):
         if clean_path in INFERENCE_PATHS and model_name:
             self._gated_inference(url, method, body, model_name)
         elif clean_path in EMBEDDING_PATHS and model_name:
+            body_summary = _parse_body_summary(body, "embed")
+            full_body = body.decode("utf-8", errors="replace") if (LOG_BODY and body) else None
+            _log_request_summary("embed", self.path, method, self.client_address[0], model_name, body_summary, full_body)
             _log(f"[embed] {self.client_address[0]} → {model_name}")
             self._forward_request(url, method, body, API_PROXY_TIMEOUT)
         else:
@@ -265,6 +331,9 @@ class ProxyHandler(SimpleHTTPRequestHandler):
                 self.send_error(503, "No running embedding models")
                 return
             url = backend_url.rstrip("/") + "/v1/embeddings"
+            body_summary = _parse_body_summary(body, "embed")
+            full_body = body.decode("utf-8", errors="replace") if (LOG_BODY and body) else None
+            _log_request_summary("embed", self.path, method, self.client_address[0], model_name, body_summary, full_body)
             _log(f"[embed] {self.client_address[0]} → {model_name}")
             self._forward_request(url, method, body, API_PROXY_TIMEOUT)
         else:
@@ -325,6 +394,10 @@ class ProxyHandler(SimpleHTTPRequestHandler):
             )
             self.wfile.write(err.encode("utf-8"))
             return
+
+        body_summary = _parse_body_summary(body, "infer")
+        full_body = body.decode("utf-8", errors="replace") if (LOG_BODY and body) else None
+        _log_request_summary("infer", self.path, method, client_ip, model_name, body_summary, full_body)
 
         is_stream = False
         if body:
@@ -644,6 +717,8 @@ def main():
         print("认证: 已从 .api-key 加载")
     else:
         print("认证: 未启用（无 .api-key）")
+    if ACCESS_LOG_FILE:
+        print(f"Access log: {ACCESS_LOG_FILE}")
     print()
 
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):

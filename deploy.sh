@@ -86,7 +86,7 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "模型选择（二选一）:"
             echo "  --model-name NAME  从 models.json 读取配置（推荐）"
-            echo "  --model-dir PATH   手动指定 GGUF 模型目录"
+            echo "  --model-dir PATH   手动指定 GGUF 模型目录（可与 --model-name 同用，覆盖默认路径）"
             echo ""
             echo "可选参数:"
             echo "  --cpp-dir PATH     llama.cpp 编译目录 (默认: ./llama.cpp)"
@@ -100,8 +100,9 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "示例:"
             echo "  $0 --model-name glm-5"
-            echo "  $0 --model-name qwen3.5 --quant UD-Q2_K_XL --port 8003"
-            echo "  $0 --model-dir ./models/custom-model/  # 高级用法"
+            echo "  $0 --model-name qwen3.5 --quant UD-Q2_K_XL --port 8003  # Qwen3.5-397B-A17B"
+            echo "  $0 --model-name qwen3.5 --model-dir ./models/unsloth-Qwen3.5-397B-A17B-GGUF/MXFP4_MOE-next --port 8005"
+            echo "  $0 --model-dir ./models/custom-model/  # 仅手填目录（无 models.json 参数）"
             exit 0
             ;;
         *)
@@ -155,6 +156,32 @@ print(f\"{model['repo_id']}|{model.get('alias', '')}|{model.get('default_port', 
 
     if [ -z "$MODEL_DIR" ]; then
         MODEL_DIR="$MODELS_DIR/$CFG_REPO_NAME/$QUANT"
+    fi
+fi
+
+# ModelScope 等下载结果常把分片放在 MODEL_DIR/<量化子目录>/ 下；若根目录无 GGUF 则自动下钻一层
+MODEL_DIR_ROOT="$MODEL_DIR"
+if [ -n "$MODEL_DIR" ] && [ -d "$MODEL_DIR" ]; then
+    _nroot=$(find "$MODEL_DIR" -maxdepth 1 -name "*.gguf" 2>/dev/null | wc -l | tr -d ' ')
+    if [ "$_nroot" -eq 0 ]; then
+        _sub=""
+        if [ -n "$QUANT" ] && [ -d "$MODEL_DIR/$QUANT" ]; then
+            _ns=$(find "$MODEL_DIR/$QUANT" -maxdepth 1 -name "*.gguf" 2>/dev/null | wc -l | tr -d ' ')
+            [ "$_ns" -gt 0 ] && _sub="$MODEL_DIR/$QUANT"
+        fi
+        if [ -z "$_sub" ]; then
+            for _d in "$MODEL_DIR"/*/; do
+                [ -d "$_d" ] || continue
+                _ns=$(find "$_d" -maxdepth 1 -name "*.gguf" 2>/dev/null | wc -l | tr -d ' ')
+                if [ "$_ns" -gt 0 ]; then
+                    _sub="${_d%/}"
+                    break
+                fi
+            done
+        fi
+        if [ -n "$_sub" ]; then
+            MODEL_DIR="$_sub"
+        fi
     fi
 fi
 
@@ -236,7 +263,10 @@ echo -e "${GREEN}模型:    $DISPLAY_NAME${NC}"
 echo -e "${GREEN}端口:    $PORT${NC}"
 echo -e "${GREEN}监听:    $HOST${NC}"
 echo -e "${GREEN}CPP_DIR: $CPP_DIR${NC}"
-echo -e "${GREEN}MODEL:   $MODEL_DIR${NC}"
+echo -e "${GREEN}MODEL:   ${MODEL_DIR_ROOT:-$MODEL_DIR}${NC}"
+if [ -n "${MODEL_DIR_ROOT:-}" ] && [ "$MODEL_DIR" != "$MODEL_DIR_ROOT" ]; then
+    echo -e "${GREEN} GGUF:   $MODEL_DIR${NC}"
+fi
 echo -e "${GREEN}参数:    temp=$TEMP top_p=$TOP_P ctx=$CTX_SIZE n_predict=$N_PREDICT${NC}"
 echo -e "${GREEN}日志:    $LOG_FILE${NC}"
 echo -e "${GREEN}监控:    /metrics 已启用${NC}"

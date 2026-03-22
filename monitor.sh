@@ -73,7 +73,7 @@ case "$CMD" in
         echo "示例:"
         echo "  $0 health"
         echo "  $0 metrics --model glm-5"
-        echo "  $0 slots --model qwen3.5"
+        echo "  $0 slots --model qwen3.5   # Qwen3.5-397B-A17B"
         exit 1
         ;;
 esac

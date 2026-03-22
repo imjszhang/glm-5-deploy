@@ -178,7 +178,8 @@ is_downloaded() {
         local model_dir
         model_dir=$(get_model_dir "$model" "$default_quant") || return 1
         local gguf_count
-        gguf_count=$(find "$model_dir" -maxdepth 1 -name "*.gguf" 2>/dev/null | wc -l | tr -d ' ')
+        # ModelScope 等可能在 <quant>/子目录/ 下放分片，允许多一层
+        gguf_count=$(find "$model_dir" -maxdepth 2 -name "*.gguf" 2>/dev/null | wc -l | tr -d ' ')
         [ "$gguf_count" -gt 0 ]
     fi
 }
@@ -215,17 +216,19 @@ cmd_list() {
         fi
 
         local detail
-        if [ "$model_type" = "embedding" ]; then
-            detail="safetensors"
-        else
-            detail=$(python3 -c "
+        detail=$(python3 -c "
 import json
 with open('$MODELS_JSON') as f:
     data = json.load(f)
-qs = list(data.get('$model', {}).get('quants', {}).keys())
-print(', '.join(qs))
+m = data.get('$model', {})
+mt = m.get('type') or 'chat'
+if mt == 'embedding':
+    print('safetensors')
+else:
+    qs = ', '.join(m.get('quants', {}).keys())
+    fn = m.get('full_model_name')
+    print(f'{fn} | {qs}' if fn else qs)
 " 2>/dev/null)
-        fi
 
         printf "  %-15s %-10s %-12s %-22b %-20b %s\n" "$model" "$model_type" "$port" "$downloaded" "$status_text" "$detail"
     done
@@ -253,6 +256,11 @@ cmd_status() {
             mem_str=$(ps -o rss= -p "$pid" 2>/dev/null | awk '{printf "%.1f GB", $1/1024/1024}' 2>/dev/null || echo "?")
 
             echo -e "  ${GREEN}$model${NC}"
+            local full_name
+            full_name=$(json_model_field "$model" "full_model_name" 2>/dev/null) || full_name=""
+            if [ -n "$full_name" ]; then
+                echo -e "    完整型号: ${CYAN}$full_name${NC}"
+            fi
             echo -e "    PID:    $pid"
             echo -e "    端口:   $port"
             echo -e "    运行:   $elapsed_str"
@@ -273,7 +281,7 @@ cmd_download() {
     shift || true
 
     if [ -z "$model" ]; then
-        echo -e "${RED}用法: $0 download <模型名> [--quant X]${NC}"
+        echo -e "${RED}用法: $0 download <模型名> [--quant X] [--to <路径>]${NC}"
         echo "可用模型: $(json_list_models | tr '\n' ' ')"
         exit 1
     fi
@@ -437,15 +445,16 @@ cmd_help() {
     echo "  $0 list"
     echo "  $0 download glm-5                              # 默认从 ModelScope 下载"
     echo "  $0 download glm-5 --source huggingface          # 从 HuggingFace 下载"
-    echo "  $0 download qwen3.5 --quant UD-Q2_K_XL"
+    echo "  $0 download qwen3.5 --quant UD-Q2_K_XL   # 完整型号: Qwen3.5-397B-A17B"
+    echo "  $0 download qwen3.5 --to unsloth-Qwen3.5-397B-A17B-GGUF/MXFP4_MOE-next  # 并行目录，不覆盖默认 MXFP4_MOE"
     echo "  $0 download jina-embed                          # 下载 embedding 模型"
     echo "  $0 start glm-5"
-    echo "  $0 start qwen3.5 --port 8003"
+    echo "  $0 start qwen3.5 --port 8003             # 完整型号: Qwen3.5-397B-A17B"
     echo "  $0 start jina-embed                             # 启动 embedding 服务"
     echo "  $0 stop glm-5"
     echo "  $0 stop --all"
     echo "  $0 status"
-    echo "  $0 logs qwen3.5"
+    echo "  $0 logs qwen3.5                         # Qwen3.5-397B-A17B"
 }
 
 # ── 主入口 ──

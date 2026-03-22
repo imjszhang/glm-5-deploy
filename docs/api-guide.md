@@ -63,6 +63,16 @@ GET /v1/models
 
 - `id` 可为「运行名」或「模型别名」，均可在下文 `model` 字段中使用。
 
+**与本仓库 `models.json` 的对应关系（避免与其它 Qwen3.5 规模混淆）：**
+
+| 列表中的 `id` / 请求里常用 `model` | 完整型号 | 权重仓库（GGUF） |
+|-----------------------------------|----------|------------------|
+| `qwen3.5` | **Qwen3.5-397B-A17B** | `unsloth/Qwen3.5-397B-A17B-GGUF` |
+| `glm-5` | GLM-5 | `unsloth/GLM-5-GGUF` |
+| `minimax` | MiniMax-M2.5 | `unsloth/MiniMax-M2.5-GGUF` |
+
+同一后端还可接受 `llama-server --alias` 所设别名（例如 Qwen 条目为 `unsloth/Qwen3.5-397B-A17B`），具体以运行中实例为准。
+
 ### 3.2 对话补全（Chat Completions）
 
 ```http
@@ -94,6 +104,8 @@ Content-Type: application/json
   "stream": true
 }
 ```
+
+其中 `model: "qwen3.5"` 表示本仓库注册的 **Qwen3.5-397B-A17B**（见上文 §3.1 对照表）。
 
 **路由规则**：  
 优先按 `model` 匹配运行中后端的「模型别名」或「运行名」，未匹配则使用当前默认（第一个运行中的）后端。若无任何运行中模型，返回 `503 No running models`。

@@ -1,7 +1,8 @@
 #!/bin/bash
 # 通用模型下载脚本
 # 从 models.json 读取 repo_id 和量化版本，支持 ModelScope（默认）和 HuggingFace 两种下载源
-# 用法: ./download.sh <模型名> [--quant X] [--source modelscope|huggingface]
+# 用法: ./download.sh <模型名> [--quant X] [--source modelscope|huggingface] [--to <路径>]
+#       --to：并行下载目录（相对 models/ 或绝对路径），不覆盖默认的 models/<repo>/<quant>/
 
 set -e
 
@@ -14,6 +15,7 @@ MODEL_NAME="$1"
 shift || true
 QUANT=""
 SOURCE="${DOWNLOAD_SOURCE:-modelscope}"
+TO_PATH=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -23,6 +25,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --source)
             SOURCE="$2"
+            shift 2
+            ;;
+        --to)
+            TO_PATH="$2"
             shift 2
             ;;
         *)
@@ -38,7 +44,7 @@ if [[ "$SOURCE" != "modelscope" && "$SOURCE" != "huggingface" ]]; then
 fi
 
 if [ -z "$MODEL_NAME" ]; then
-    echo "用法: $0 <模型名> [--quant X] [--source modelscope|huggingface]"
+    echo "用法: $0 <模型名> [--quant X] [--source modelscope|huggingface] [--to <路径>]"
     echo ""
     echo "可用模型:"
     python3 -c "
@@ -81,7 +87,22 @@ fi
 
 QUANT="${QUANT:-$DEFAULT_QUANT}"
 REPO_NAME="${REPO_NAME:-$(echo "$REPO_ID" | tr '/' '-')}"
-TARGET_DIR="$MODELS_DIR/$REPO_NAME/$QUANT"
+
+if [ -n "$TO_PATH" ]; then
+    case "$TO_PATH" in
+        *..*)
+            echo -e "\033[0;31m错误: --to 路径中不允许 '..'\033[0m"
+            exit 1
+            ;;
+    esac
+    if [[ "$TO_PATH" = /* ]]; then
+        TARGET_DIR="$TO_PATH"
+    else
+        TARGET_DIR="$MODELS_DIR/$TO_PATH"
+    fi
+else
+    TARGET_DIR="$MODELS_DIR/$REPO_NAME/$QUANT"
+fi
 
 # 使用项目 .venv 中的 Python（若存在）
 if [ -f "$SCRIPT_DIR/.venv/bin/python" ]; then
@@ -104,6 +125,9 @@ echo "仓库:      $REPO_ID"
 echo "量化版本:  $QUANT"
 echo "匹配模式:  $PATTERN"
 echo "目标目录:  $TARGET_DIR"
+if [ -n "$TO_PATH" ]; then
+    echo -e "\033[0;36m并行下载:\033[0m  默认目录 $MODELS_DIR/$REPO_NAME/$QUANT 不会被写入"
+fi
 echo "Python:    $PYTHON_BIN"
 echo "========================================"
 
@@ -149,4 +173,11 @@ echo "========================================"
 find "$TARGET_DIR" -name "*.gguf" -exec ls -lh {} \;
 echo ""
 echo "部署示例:"
-echo "  ./manage.sh start $MODEL_NAME"
+if [ -n "$TO_PATH" ]; then
+    echo "  # 下载期间默认目录未动，继续用: ./manage.sh start $MODEL_NAME"
+    echo "  # 新版就绪后切到新目录（建议先 stop，再启新路径；或换端口见 DEPLOY.md）:"
+    echo "  ./deploy.sh --model-name $MODEL_NAME --model-dir \"$TARGET_DIR\" --port <端口>"
+    echo "  ./manage.sh start $MODEL_NAME --model-dir \"$TARGET_DIR\" --port <端口>"
+else
+    echo "  ./manage.sh start $MODEL_NAME"
+fi

@@ -10,7 +10,7 @@
 |------------|------------------|------|----------|------|----------|
 | `jina-embed` | `jina-embeddings-v5-text-small` | embedding | 8004 | safetensors | ~1.4GB |
 
-- **与对话模型区别**：对话模型（如 qwen3.5、glm-5）使用 llama.cpp + GGUF；Jina 使用 **transformers** 加载 **safetensors**，由独立服务 `serve_embedding.py` 提供 HTTP 接口。
+- **与对话模型区别**：对话模型（如 **Qwen3.5-397B-A17B**（配置键 `qwen3.5`）、`glm-5`）使用 llama.cpp + GGUF；Jina 使用 **transformers** 加载 **safetensors**，由独立服务 `serve_embedding.py` 提供 HTTP 接口。
 - **路由**：前端代理 `serve-ui.py`（端口 8888）会根据请求体中的 `model` 字段，将 `/v1/embeddings` 转发到 Jina 后端（8004）。
 
 ---

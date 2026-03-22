@@ -6,11 +6,11 @@
 
 ### 对话模型（Chat）
 
-| 模型 | 默认端口 | 默认量化 | 磁盘占用 |
-|------|----------|----------|----------|
-| GLM-5 | 8001 | UD-IQ2_XXS (2-bit) | ~241GB |
-| Qwen3.5-397B-A17B | 8002 | MXFP4_MOE (4-bit) | ~214GB |
-| MiniMax-M2.5 | 8003 | BF16 | ~457GB |
+| 模型（`manage.sh` 键名） | 完整型号 / 说明 | 默认端口 | 默认量化 | 磁盘占用 |
+|------|----------|----------|----------|----------|
+| `glm-5` | GLM-5 | 8001 | UD-IQ2_XXS (2-bit) | ~241GB |
+| `qwen3.5` | **Qwen3.5-397B-A17B**（Unsloth GGUF：`unsloth/Qwen3.5-397B-A17B-GGUF`） | 8002 | MXFP4_MOE (4-bit) | ~214GB |
+| `minimax` | MiniMax-M2.5 | 8003 | BF16 | ~457GB |
 
 ### Embedding 模型
 
@@ -90,7 +90,7 @@ Embedding 接口额外支持：
 
 ```bash
 ./manage.sh start glm-5                     # 对话，端口 8001
-./manage.sh start qwen3.5                   # 对话，端口 8002
+./manage.sh start qwen3.5                   # Qwen3.5-397B-A17B，端口 8002
 ./manage.sh start jina-embed                # Embedding，端口 8004
 
 ./manage.sh status                          # 查看所有实例

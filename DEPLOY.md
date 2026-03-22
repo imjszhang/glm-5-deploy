@@ -59,13 +59,27 @@ pip install -r requirements.txt
 # 下载 GLM-5（默认 UD-IQ2_XXS，~241GB）
 ./manage.sh download glm-5
 
-# 下载 Qwen3.5（默认 MXFP4_MOE，~214GB）
+# 下载 Qwen3.5-397B-A17B（配置键 qwen3.5；默认 MXFP4_MOE，~214GB）
 ./manage.sh download qwen3.5
+
+# 并行下载新版、不覆盖当前在用的目录（路径相对项目下 models/，或写绝对路径）
+./manage.sh download qwen3.5 --quant MXFP4_MOE --to unsloth-Qwen3.5-397B-A17B-GGUF/MXFP4_MOE-next
 
 # 指定量化版本
 ./manage.sh download glm-5 --quant UD-TQ1_0
-./manage.sh download qwen3.5 --quant UD-Q2_K_XL
+./manage.sh download qwen3.5 --quant UD-Q2_K_XL   # 仍为 Qwen3.5-397B-A17B，更小体积量化
 ```
+
+下载完成后，**默认**仍使用原来的 `models/<repo>/<quant>/`；新版在 `--to` 指定目录。切换时：
+
+```bash
+./manage.sh stop qwen3.5
+./manage.sh start qwen3.5 --model-dir "$PWD/models/unsloth-Qwen3.5-397B-A17B-GGUF/MXFP4_MOE-next"
+```
+
+`--model-dir` 会覆盖 `models.json` 里的默认路径，其余参数（模板、`mmproj`、`extra_args` 等）仍从 `qwen3.5` 读取。多模态用的 `mmproj-F16.gguf` 仍在仓库根目录 `models/unsloth-Qwen3.5-397B-A17B-GGUF/`；若官方更新了 mmproj，请在同一目录替换或单独下载该文件。
+
+**说明**：`manage.sh` 按配置键管理 `run/<键名>.pid`，同名模型同时只能登记一个进程。要在验证新版时**暂时双开**旧版与新版，需要在 `models.json` 里复制一条不同键名的配置（不同 `default_port`），或自行处理第二个进程的 PID/端口，避免互相覆盖。
 
 ---
 
@@ -78,7 +92,7 @@ pip install -r requirements.txt
 ./manage.sh start glm-5
 
 # 启动指定端口
-./manage.sh start qwen3.5 --port 8003
+./manage.sh start qwen3.5 --port 8003   # Qwen3.5-397B-A17B
 
 # 启动指定量化版本
 ./manage.sh start qwen3.5 --quant UD-Q2_K_XL
@@ -88,7 +102,7 @@ pip install -r requirements.txt
 
 ```bash
 ./manage.sh start glm-5      # 端口 8001
-./manage.sh start qwen3.5    # 端口 8002
+./manage.sh start qwen3.5    # Qwen3.5-397B-A17B，端口 8002
 ./manage.sh status            # 查看所有实例
 ```
 
@@ -141,7 +155,7 @@ curl -X POST http://localhost:8888/api/glm-5/v1/chat/completions \
 ```bash
 ./monitor.sh health                  # 默认端口 8001
 ./monitor.sh metrics --model glm-5   # 指定模型
-./monitor.sh slots --model qwen3.5   # 指定模型
+./monitor.sh slots --model qwen3.5   # Qwen3.5-397B-A17B
 ```
 
 ---
@@ -196,9 +210,9 @@ curl -X POST http://localhost:8888/api/glm-5/v1/chat/completions \
 
 | 内存 | 推荐方案 |
 |------|----------|
-| 512GB Apple Studio | 同时运行 GLM-5 (241GB) + Qwen3.5 (214GB) |
-| 256GB Mac | 运行一个大模型：GLM-5 UD-IQ2_XXS 或 Qwen3.5 MXFP4_MOE |
-| 192GB | 小量化版本：GLM-5 UD-TQ1_0 (176GB) 或 Qwen3.5 UD-Q2_K_XL (120GB) |
+| 512GB Apple Studio | 同时运行 GLM-5 (241GB) + Qwen3.5-397B-A17B (214GB) |
+| 256GB Mac | 运行一个大模型：GLM-5 UD-IQ2_XXS 或 Qwen3.5-397B-A17B MXFP4_MOE |
+| 192GB | 小量化版本：GLM-5 UD-TQ1_0 (176GB) 或 Qwen3.5-397B-A17B UD-Q2_K_XL (120GB) |
 
 ---
 

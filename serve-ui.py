@@ -15,6 +15,7 @@ Local LLM Deploy — 前端静态服务 + 多模型 API 代理 + 推理请求队
   推理接口按模型串行处理，防止请求互相取消。
   排队期间对流式请求发送 SSE keepalive 保持连接。
 """
+import errno
 import json
 import os
 import queue
@@ -52,6 +53,15 @@ _access_log_lock = threading.Lock()
 def _log(msg):
     sys.stderr.write(f"[serve-ui] {msg}\n")
     sys.stderr.flush()
+
+
+def _is_client_disconnected(exc):
+    """客户端已关闭连接时，再往 socket 写会触发这些错误；不应再 send_error。"""
+    if isinstance(exc, (BrokenPipeError, ConnectionResetError)):
+        return True
+    if isinstance(exc, OSError) and exc.errno in (errno.EPIPE, errno.ECONNRESET):
+        return True
+    return False
 
 
 def _parse_body_summary(body, kind="infer"):
@@ -342,14 +352,14 @@ class ProxyHandler(SimpleHTTPRequestHandler):
         if clean_path in INFERENCE_PATHS:
             model_name, backend_url = self._resolve_model_from_body(body)
             if not backend_url:
-                self.send_error(503, "No running models")
+                self._send_error_safe(503, "No running models")
                 return
             url = backend_url.rstrip("/") + self.path
             self._gated_inference(url, method, body, model_name)
         elif clean_path in EMBEDDING_PATHS:
             model_name, backend_url = self._resolve_model_from_body(body)
             if not backend_url:
-                self.send_error(503, "No running embedding models")
+                self._send_error_safe(503, "No running embedding models")
                 return
             url = backend_url.rstrip("/") + "/v1/embeddings"
             body_summary = _parse_body_summary(body, "embed")
@@ -554,6 +564,14 @@ class ProxyHandler(SimpleHTTPRequestHandler):
         self.wfile.write(b"\r\n")
         self.wfile.flush()
 
+    def _send_error_safe(self, code, message=""):
+        """向客户端发送错误页；若对端已断开则静默结束，避免 BrokenPipe 链式异常。"""
+        try:
+            self.send_error(code, message)
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            if not _is_client_disconnected(e):
+                raise
+
     def _forward_request(self, url, method, body, timeout, capture_response=False):
         """Forward request and relay full response (headers + body).
         If capture_response is True, returns the response body bytes; otherwise returns None."""
@@ -577,30 +595,47 @@ class ProxyHandler(SimpleHTTPRequestHandler):
                 self.wfile.write(b"0\r\n\r\n")
             return b"".join(out) if out is not None else None
         except urllib.error.HTTPError as e:
-            self.send_response(e.code)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            err_body = e.read()
-            self.wfile.write(err_body)
+            try:
+                self.send_response(e.code)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                err_body = e.read()
+                self.wfile.write(err_body)
+            except (BrokenPipeError, ConnectionResetError, OSError) as w:
+                if _is_client_disconnected(w):
+                    return None
+                raise
             if out is not None:
                 return err_body
             return None
         except urllib.error.URLError as e:
-            if (
-                isinstance(getattr(e, "reason", None), socket.timeout)
-                or "timed out" in str(e).lower()
-            ):
-                self.send_response(504)
-                self.send_header("Content-Type", "application/json")
-                self.end_headers()
-                self.wfile.write(
-                    '{"error":"推理中，监控接口被阻塞，请稍后刷新"}'.encode("utf-8")
-                )
-            else:
-                self.send_error(502, str(e))
+            try:
+                if (
+                    isinstance(getattr(e, "reason", None), socket.timeout)
+                    or "timed out" in str(e).lower()
+                ):
+                    self.send_response(504)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(
+                        '{"error":"推理中，监控接口被阻塞，请稍后刷新"}'.encode(
+                            "utf-8"
+                        )
+                    )
+                else:
+                    self._send_error_safe(502, str(e))
+            except (BrokenPipeError, ConnectionResetError, OSError) as w:
+                if _is_client_disconnected(w):
+                    return None
+                raise
+            return None
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            if _is_client_disconnected(e):
+                return None
+            raise
         except Exception as e:
-            self.send_error(502, str(e))
-        return None
+            self._send_error_safe(502, str(e))
+            return None
 
     def _forward_with_keepalive(self, url, method, body, capture_response=False):
         """Forward to backend with keepalive during long prompt processing.
@@ -672,8 +707,11 @@ class ProxyHandler(SimpleHTTPRequestHandler):
                     if out is not None:
                         out.append(chunk_data)
                     break
-        except (BrokenPipeError, ConnectionResetError, OSError):
-            _log("[infer] 客户端断开")
+        except (BrokenPipeError, ConnectionResetError, OSError) as e:
+            if _is_client_disconnected(e):
+                _log("[infer] 客户端断开")
+            else:
+                raise
         finally:
             try:
                 self.wfile.write(b"0\r\n\r\n")

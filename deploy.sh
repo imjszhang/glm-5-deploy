@@ -270,8 +270,10 @@ fi
 echo -e "${GREEN}参数:    temp=$TEMP top_p=$TOP_P ctx=$CTX_SIZE n_predict=$N_PREDICT${NC}"
 echo -e "${GREEN}日志:    $LOG_FILE${NC}"
 echo -e "${GREEN}监控:    /metrics 已启用${NC}"
-if [ -n "$CFG_MMPROJ" ] && [ -n "$CFG_REPO_NAME" ] && [ -f "$MODELS_DIR/$CFG_REPO_NAME/$CFG_MMPROJ" ]; then
-    echo -e "${GREEN}多模态:   已启用 (mmproj)${NC}"
+if [ -n "$CFG_MMPROJ" ]; then
+    if [ -f "$MODEL_DIR/$CFG_MMPROJ" ] || { [ -n "$CFG_REPO_NAME" ] && [ -f "$MODELS_DIR/$CFG_REPO_NAME/$CFG_MMPROJ" ]; }; then
+        echo -e "${GREEN}多模态:   已启用 (mmproj)${NC}"
+    fi
 fi
 if [ -n "$CFG_CHAT_TMPL" ]; then
     echo -e "${GREEN}模板:    $CFG_CHAT_TMPL${NC}"
@@ -317,10 +319,15 @@ LLAMA_ARGS=(
     --threads-http 64
 )
 
-# 追加 mmproj（多模态视觉）
-if [ -n "$CFG_MMPROJ" ] && [ -n "$CFG_REPO_NAME" ]; then
-    MMPROJ_FILE="$MODELS_DIR/$CFG_REPO_NAME/$CFG_MMPROJ"
-    if [ -f "$MMPROJ_FILE" ]; then
+# 追加 mmproj（多库根目录或与 GGUF 同目录）
+if [ -n "$CFG_MMPROJ" ]; then
+    MMPROJ_FILE=""
+    if [ -f "$MODEL_DIR/$CFG_MMPROJ" ]; then
+        MMPROJ_FILE="$MODEL_DIR/$CFG_MMPROJ"
+    elif [ -n "$CFG_REPO_NAME" ] && [ -f "$MODELS_DIR/$CFG_REPO_NAME/$CFG_MMPROJ" ]; then
+        MMPROJ_FILE="$MODELS_DIR/$CFG_REPO_NAME/$CFG_MMPROJ"
+    fi
+    if [ -n "$MMPROJ_FILE" ]; then
         LLAMA_ARGS+=(--mmproj "$MMPROJ_FILE")
     fi
 fi

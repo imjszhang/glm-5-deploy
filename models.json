@@ -71,6 +71,43 @@
     },
     "mmproj": "mmproj-F16.gguf"
   },
+  "qwen3.5-27b": {
+    "full_model_name": "Qwen3.5-27B",
+    "repo_id": "unsloth/Qwen3.5-27B-GGUF",
+    "repo_name": "Qwen3.5-27B-GGUF",
+    "default_quant": "Q4_K_M",
+    "chat_template_file": "templates/qwen3.5.jinja",
+    "download_allow_patterns": ["*Q4_K_M*", "mmproj-F16.gguf"],
+    "quants": {
+      "Q4_K_M": {
+        "pattern": "*Q4_K_M*",
+        "size_gb": 17
+      },
+      "Q8_0": {
+        "pattern": "*Q8_0*",
+        "size_gb": 29
+      }
+    },
+    "alias": "unsloth/Qwen3.5-27B",
+    "default_port": 8005,
+    "params": {
+      "temp": 0.6,
+      "top_p": 0.95,
+      "ctx_size": 131072,
+      "n_predict": 32768,
+      "repeat_penalty": 1.0,
+      "extra_args": [
+        "--jinja",
+        "--reasoning-budget",
+        "0",
+        "--top-k",
+        "20",
+        "--min-p",
+        "0"
+      ]
+    },
+    "mmproj": "mmproj-F16.gguf"
+  },
   "minimax": {
     "repo_id": "unsloth/MiniMax-M2.5-GGUF",
     "repo_name": "MiniMax-M2.5-GGUF",

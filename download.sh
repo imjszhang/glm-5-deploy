@@ -59,8 +59,8 @@ for name, cfg in data.items():
     exit 1
 fi
 
-# 从 models.json 读取配置
-read -r REPO_ID DEFAULT_QUANT PATTERN REPO_NAME <<< "$(python3 -c "
+# 从 models.json 读取配置（TAB 分隔，避免模式串含空格）
+IFS=$'\t' read -r REPO_ID DEFAULT_QUANT PATTERN REPO_NAME ALLOW_PATTERNS_PRINT <<< "$(python3 -c "
 import json, sys
 with open('$MODELS_JSON') as f:
     data = json.load(f)
@@ -74,7 +74,9 @@ if not q:
     print(f'可用量化版本: {list(model[\"quants\"].keys())}', file=sys.stderr)
     sys.exit(1)
 repo_name = model.get('repo_name') or model['repo_id'].replace('/', '-')
-print(model['repo_id'], quant, q['pattern'], repo_name)
+patterns = model.get('download_allow_patterns', [q['pattern']])
+allow_print = ', '.join(patterns)
+print(model['repo_id'] + chr(9) + quant + chr(9) + q['pattern'] + chr(9) + repo_name + chr(9) + allow_print)
 " 2>&1)" || {
     echo -e "\033[0;31m错误: 未知模型 '$MODEL_NAME' 或量化版本 '${QUANT}'\033[0m"
     exit 1
@@ -123,7 +125,7 @@ echo "========================================"
 echo "下载源:    $SOURCE_LABEL"
 echo "仓库:      $REPO_ID"
 echo "量化版本:  $QUANT"
-echo "匹配模式:  $PATTERN"
+echo "匹配模式:  ${ALLOW_PATTERNS_PRINT:-$PATTERN}"
 echo "目标目录:  $TARGET_DIR"
 if [ -n "$TO_PATH" ]; then
     echo -e "\033[0;36m并行下载:\033[0m  默认目录 $MODELS_DIR/$REPO_NAME/$QUANT 不会被写入"
@@ -139,31 +141,56 @@ if [ "$SOURCE" = "modelscope" ]; then
         "$PYTHON_BIN" -m pip install -q modelscope
     }
 
-    echo "开始下载 $REPO_ID (包含 $PATTERN) [ModelScope]..."
-    "$PYTHON_BIN" -c "
+    echo "开始下载 $REPO_ID (模式: $ALLOW_PATTERNS_PRINT) [ModelScope]..."
+    MODEL_NAME="$MODEL_NAME" TARGET_DIR="$TARGET_DIR" REPO_ID="$REPO_ID" MODELS_JSON="$MODELS_JSON" MODELS_DIR="$MODELS_DIR" QUANT="$QUANT" \
+    "$PYTHON_BIN" <<'PY'
+import json, os
 from modelscope import snapshot_download
+with open(os.environ["MODELS_JSON"]) as f:
+    data = json.load(f)
+model = data[os.environ["MODEL_NAME"]]
+quant = os.environ["QUANT"] or model["default_quant"]
+q = model["quants"][quant]
+patterns = model.get("download_allow_patterns", [q["pattern"]])
 snapshot_download(
-    '$REPO_ID',
-    cache_dir='$MODELS_DIR/.cache',
-    local_dir='$TARGET_DIR',
-    allow_patterns=['$PATTERN'],
+    os.environ["REPO_ID"],
+    cache_dir=os.path.join(os.environ["MODELS_DIR"], ".cache"),
+    local_dir=os.environ["TARGET_DIR"],
+    allow_patterns=patterns,
 )
-"
+PY
 else
     "$PYTHON_BIN" -c "import huggingface_hub" 2>/dev/null || {
         echo "正在安装 huggingface_hub 和 hf_transfer..."
         "$PYTHON_BIN" -m pip install -U huggingface_hub hf_transfer
     }
 
-    echo "开始下载 $REPO_ID (包含 $PATTERN) [HuggingFace]..."
-    "$PYTHON_BIN" -c "
+    if [ -n "${HF_ENDPOINT:-}" ]; then
+        echo "HF_ENDPOINT: $HF_ENDPOINT"
+        # 镜像站与 hf_transfer 并行拉取偶发卡死、终端长时间无输出；未显式开启则关闭
+        case "${HF_HUB_ENABLE_HF_TRANSFER:-}" in
+            1|true|TRUE|yes|YES) ;;
+            *) export HF_HUB_ENABLE_HF_TRANSFER=0 ;;
+        esac
+    fi
+    export HF_HUB_DISABLE_PROGRESS_BARS=0
+    echo "开始下载 $REPO_ID (模式: $ALLOW_PATTERNS_PRINT) [HuggingFace]..."
+    MODEL_NAME="$MODEL_NAME" TARGET_DIR="$TARGET_DIR" REPO_ID="$REPO_ID" MODELS_JSON="$MODELS_JSON" MODELS_DIR="$MODELS_DIR" QUANT="$QUANT" \
+    "$PYTHON_BIN" <<'PY'
+import json, os
 from huggingface_hub import snapshot_download
+with open(os.environ["MODELS_JSON"]) as f:
+    data = json.load(f)
+model = data[os.environ["MODEL_NAME"]]
+quant = os.environ["QUANT"] or model["default_quant"]
+q = model["quants"][quant]
+patterns = model.get("download_allow_patterns", [q["pattern"]])
 snapshot_download(
-    repo_id='$REPO_ID',
-    local_dir='$TARGET_DIR',
-    allow_patterns=['$PATTERN'],
+    repo_id=os.environ["REPO_ID"],
+    local_dir=os.environ["TARGET_DIR"],
+    allow_patterns=patterns,
 )
-"
+PY
 fi
 
 echo ""

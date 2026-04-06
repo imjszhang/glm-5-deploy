@@ -7,6 +7,7 @@ __pycache__/
 # 模型与构建产物（llama.cpp 需单独 clone，见 README）
 models/
 llama.cpp/
+work_dir/
 
 # 隐私与密钥（切勿提交）
 .api-key

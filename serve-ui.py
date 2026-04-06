@@ -7,7 +7,9 @@ Local LLM Deploy — 前端静态服务 + 多模型 API 代理 + 推理请求队
   /v1/models             → OpenAI 标准模型列表
   /v1/chat/completions   → 按请求体 model 字段路由到对应后端（推荐）
   /v1/embeddings         → 按请求体 model 字段路由到 embedding 后端
-  /api/models            → 返回运行中的模型列表（从 run/*.pid 读取）
+  /api/models            → 返回运行中的模型列表 + Ollama 聚合状态
+  /api/system            → 系统资源信息（CPU/内存/进程）
+  /api/ollama/*          → 代理到 Ollama HTTP API
   /api/<model-name>/*    → 代理到该模型对应的后端端口
   /api/*                 → 代理到默认（第一个运行中的）后端
 
@@ -20,7 +22,9 @@ import errno
 import json
 import os
 import queue
+import re
 import socket
+import subprocess
 import sys
 import threading
 import time
@@ -50,6 +54,9 @@ KV_CHARS_PER_TOKEN = float(os.environ.get("KV_CHARS_PER_TOKEN", "2.5"))
 MODELS_JSON = os.path.join(SCRIPT_DIR, "models.json")
 ACCESS_LOG_FILE = os.environ.get("SERVE_UI_ACCESS_LOG", "").strip() or None
 LOG_BODY = os.environ.get("SERVE_UI_LOG_BODY", "").strip().lower() in ("1", "true", "yes")
+OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434").rstrip("/")
+SYSTEM_CACHE_TTL = 3
+OLLAMA_CACHE_TTL = 5
 
 _access_log_lock = threading.Lock()
 
@@ -205,6 +212,197 @@ def estimate_kv_tokens(body, model_name):
         max_tokens = params.get("n_predict", 32768)
     prompt_tokens_est = int(prompt_chars / KV_CHARS_PER_TOKEN) if prompt_chars else 0
     return prompt_tokens_est + max_tokens, max_tokens
+
+
+# ── 系统资源采集（macOS 原生命令） ─────────────────────────────
+
+_system_cache = {"data": None, "ts": 0.0}
+_system_cache_lock = threading.Lock()
+
+
+def _collect_system_info():
+    """Collect CPU, memory, load average and per-process stats via macOS commands."""
+    result = {
+        "cpu": {"user": 0, "sys": 0, "idle": 100},
+        "load_avg": [0, 0, 0],
+        "memory": {"total_gb": 0, "used_gb": 0, "free_gb": 0, "wired_gb": 0},
+        "processes": {"llama_server": [], "ollama": []},
+        "cached_at": time.time(),
+    }
+
+    try:
+        top_out = subprocess.run(
+            ["top", "-l", "1", "-n", "0", "-s", "0"],
+            capture_output=True, text=True, timeout=10,
+        ).stdout
+        cpu_m = re.search(
+            r"CPU usage:\s*([\d.]+)%\s*user,\s*([\d.]+)%\s*sys,\s*([\d.]+)%\s*idle",
+            top_out,
+        )
+        if cpu_m:
+            result["cpu"] = {
+                "user": float(cpu_m.group(1)),
+                "sys": float(cpu_m.group(2)),
+                "idle": float(cpu_m.group(3)),
+            }
+        load_m = re.search(
+            r"Load Avg:\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)", top_out
+        )
+        if load_m:
+            result["load_avg"] = [
+                float(load_m.group(1)),
+                float(load_m.group(2)),
+                float(load_m.group(3)),
+            ]
+        mem_m = re.search(
+            r"PhysMem:\s*([\d.]+)([GMTK])\s*used.*?([\d.]+)([GMTK])\s*unused",
+            top_out,
+        )
+        if mem_m:
+            def _to_gb(val, unit):
+                v = float(val)
+                return {"T": v * 1024, "G": v, "M": v / 1024, "K": v / (1024 * 1024)}.get(unit, v)
+            used = _to_gb(mem_m.group(1), mem_m.group(2))
+            free = _to_gb(mem_m.group(3), mem_m.group(4))
+            result["memory"]["used_gb"] = round(used, 1)
+            result["memory"]["free_gb"] = round(free, 1)
+            result["memory"]["total_gb"] = round(used + free, 1)
+        wired_m = re.search(r"\((\d+[GMTK]?)\s*wired", top_out)
+        if wired_m:
+            w = wired_m.group(1)
+            wm = re.match(r"([\d.]+)([GMTK])?", w)
+            if wm:
+                unit = wm.group(2) or "G"
+                result["memory"]["wired_gb"] = round(
+                    {"T": 1024, "G": 1, "M": 1/1024, "K": 1/(1024*1024)}.get(unit, 1) * float(wm.group(1)), 1
+                )
+    except Exception as e:
+        _log(f"[system] top parse error: {e}")
+
+    running = get_running_models()
+    running_pids = {info["pid"]: name for name, info in running.items()}
+    running_ports = {name: info["port"] for name, info in running.items()}
+
+    try:
+        ps_out = subprocess.run(
+            ["ps", "-eo", "pid,rss,%cpu,comm"],
+            capture_output=True, text=True, timeout=5,
+        ).stdout
+        for line in ps_out.strip().split("\n")[1:]:
+            parts = line.split()
+            if len(parts) < 4:
+                continue
+            try:
+                pid = int(parts[0])
+                rss_kb = int(parts[1])
+                cpu_pct = float(parts[2])
+            except (ValueError, IndexError):
+                continue
+            comm = " ".join(parts[3:])
+            rss_gb = round(rss_kb / (1024 * 1024), 2)
+            if "llama-server" in comm or "llama_server" in comm:
+                entry = {"pid": pid, "rss_gb": rss_gb, "cpu_pct": cpu_pct}
+                if pid in running_pids:
+                    name = running_pids[pid]
+                    entry["port"] = running_ports.get(name)
+                    entry["model"] = name
+                result["processes"]["llama_server"].append(entry)
+            elif "ollama" in comm.lower():
+                result["processes"]["ollama"].append(
+                    {"pid": pid, "rss_gb": rss_gb, "cpu_pct": cpu_pct, "comm": os.path.basename(comm)}
+                )
+    except Exception as e:
+        _log(f"[system] ps parse error: {e}")
+
+    return result
+
+
+def get_system_info():
+    """Return cached system info, refreshing if older than SYSTEM_CACHE_TTL."""
+    now = time.monotonic()
+    with _system_cache_lock:
+        if _system_cache["data"] and now - _system_cache["ts"] < SYSTEM_CACHE_TTL:
+            return _system_cache["data"]
+    data = _collect_system_info()
+    with _system_cache_lock:
+        _system_cache["data"] = data
+        _system_cache["ts"] = now
+    return data
+
+
+# ── Ollama 状态采集 ────────────────────────────────────────────
+
+_ollama_cache = {"data": None, "ts": 0.0}
+_ollama_cache_lock = threading.Lock()
+
+
+def _fetch_ollama_status():
+    """Fetch Ollama status from its HTTP API. Returns dict or None on failure."""
+    result = {
+        "status": "offline",
+        "host": OLLAMA_HOST.replace("http://", ""),
+    }
+    try:
+        req = urllib.request.Request(OLLAMA_HOST + "/api/version", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            ver = json.loads(resp.read())
+            result["version"] = ver.get("version", "unknown")
+            result["status"] = "running"
+    except Exception:
+        return result
+
+    try:
+        req = urllib.request.Request(OLLAMA_HOST + "/api/tags", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            tags = json.loads(resp.read())
+        available = []
+        for m in tags.get("models", []):
+            available.append({
+                "name": m.get("name", ""),
+                "size_gb": round(m.get("size", 0) / (1024**3), 1),
+                "quantization": (m.get("details") or {}).get("quantization_level", ""),
+                "family": (m.get("details") or {}).get("family", ""),
+                "parameter_size": (m.get("details") or {}).get("parameter_size", ""),
+            })
+        result["available"] = available
+    except Exception:
+        result["available"] = []
+
+    try:
+        req = urllib.request.Request(OLLAMA_HOST + "/api/ps", method="GET")
+        with urllib.request.urlopen(req, timeout=3) as resp:
+            ps = json.loads(resp.read())
+        loaded = []
+        for m in ps.get("models", []):
+            entry = {
+                "name": m.get("name", ""),
+                "size_gb": round(m.get("size", 0) / (1024**3), 1),
+                "vram_gb": round(m.get("size_vram", 0) / (1024**3), 1),
+            }
+            if m.get("expires_at"):
+                entry["expires_at"] = m["expires_at"]
+            if m.get("details"):
+                entry["quantization"] = m["details"].get("quantization_level", "")
+                entry["family"] = m["details"].get("family", "")
+            loaded.append(entry)
+        result["loaded"] = loaded
+    except Exception:
+        result["loaded"] = []
+
+    return result
+
+
+def get_ollama_status():
+    """Return cached Ollama status, refreshing if older than OLLAMA_CACHE_TTL."""
+    now = time.monotonic()
+    with _ollama_cache_lock:
+        if _ollama_cache["data"] and now - _ollama_cache["ts"] < OLLAMA_CACHE_TTL:
+            return _ollama_cache["data"]
+    data = _fetch_ollama_status()
+    with _ollama_cache_lock:
+        _ollama_cache["data"] = data
+        _ollama_cache["ts"] = now
+    return data
 
 
 def get_running_models():
@@ -443,11 +641,18 @@ class ProxyHandler(SimpleHTTPRequestHandler):
 
     def resolve_backend(self, api_path):
         """解析 API 路径，返回 (backend_url, remaining_path, model_name)"""
-        if api_path.lstrip("/") == "models":
+        stripped = api_path.lstrip("/")
+        if stripped == "models":
             return None, "models", None
+        if stripped == "system":
+            return None, "system", None
+
+        parts = stripped.split("/", 1)
+        if parts[0] == "ollama":
+            remaining = "/" + parts[1] if len(parts) > 1 else "/"
+            return OLLAMA_HOST, remaining, None
 
         models = get_running_models()
-        parts = api_path.lstrip("/").split("/", 1)
         if len(parts) >= 1 and parts[0] in models:
             model_name = parts[0]
             port = models[model_name]["port"]
@@ -472,6 +677,9 @@ class ProxyHandler(SimpleHTTPRequestHandler):
 
         if backend_url is None and remaining_path == "models":
             self.handle_models_endpoint()
+            return
+        if backend_url is None and remaining_path == "system":
+            self.handle_system_endpoint()
             return
 
         url = backend_url.rstrip("/") + remaining_path
@@ -993,8 +1201,18 @@ class ProxyHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def handle_system_endpoint(self):
+        """返回系统资源信息（CPU/内存/进程）"""
+        data = get_system_info()
+        body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def handle_models_endpoint(self):
-        """返回运行中的模型列表，包含队列与 KV 预算状态"""
+        """返回运行中的模型列表，包含队列与 KV 预算状态，以及 Ollama 聚合信息"""
         models = get_running_models()
         result = []
         for name, info in models.items():
@@ -1010,8 +1228,10 @@ class ProxyHandler(SimpleHTTPRequestHandler):
                 entry["budget"] = gate.budget_snapshot()
             result.append(entry)
         g_snap = get_global_gate().snapshot()
+        ollama = get_ollama_status()
         payload = {
             "models": result,
+            "ollama": ollama,
             "global": g_snap,
         }
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")

@@ -5,355 +5,883 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>LLM 监控</title>
     <style>
-        :root { --bg: #0f0f12; --card: #1a1a1f; --text: #e4e4e7; --muted: #71717a; --accent: #22c55e; --warn: #eab308; }
+        :root {
+            --bg: #0a0a0f;
+            --card: #141419;
+            --card-border: #1e1e26;
+            --text: #e4e4e7;
+            --muted: #71717a;
+            --accent: #22c55e;
+            --accent-dim: #16a34a;
+            --warn: #eab308;
+            --error: #ef4444;
+            --info: #6366f1;
+            --ring-bg: #27272a;
+            --bar-bg: #1e1e26;
+        }
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { font-family: ui-sans-serif, system-ui, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 1.5rem; }
-        h1 { font-size: 1.5rem; margin-bottom: 1rem; }
-        .card { background: var(--card); border-radius: 0.5rem; padding: 1rem; margin-bottom: 1rem; }
-        .card h2 { font-size: 0.875rem; color: var(--muted); margin-bottom: 0.5rem; text-transform: uppercase; }
-        .metric { display: flex; justify-content: space-between; padding: 0.25rem 0; font-family: ui-monospace, monospace; }
-        .metric span:last-child { color: var(--accent); }
-        .status { display: inline-block; width: 0.5rem; height: 0.5rem; border-radius: 50%; margin-right: 0.5rem; }
-        .status.ok { background: var(--accent); }
-        .status.err { background: #ef4444; }
-        .config-row { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.75rem; flex-wrap: wrap; }
-        .config-row select, .config-row input { padding: 0.5rem; border-radius: 0.25rem; border: 1px solid #27272a; background: var(--card); color: var(--text); }
-        .config-row select { min-width: 160px; }
-        .config-row input { flex: 1; min-width: 200px; }
-        .config-row button { padding: 0.5rem 1rem; border-radius: 0.25rem; border: none; background: var(--accent); color: #000; cursor: pointer; font-weight: 500; white-space: nowrap; }
-        .config-row button:hover { opacity: 0.9; }
-        .config-row button.secondary { background: var(--muted); }
-        .nav { margin-bottom: 1rem; }
-        .nav a { color: var(--muted); text-decoration: none; margin-right: 1rem; }
-        .nav a:hover { color: var(--text); }
-        .slot { padding: 0.5rem; background: #27272a; border-radius: 0.25rem; margin-bottom: 0.5rem; font-size: 0.875rem; }
-        .slot.busy { border-left: 3px solid var(--accent); animation: pulse 2s ease-in-out infinite; }
-        @keyframes pulse { 0%, 100% { border-left-color: var(--accent); } 50% { border-left-color: #16a34a; } }
-        .slot-header { display: flex; justify-content: space-between; align-items: center; }
-        .slot-progress { color: var(--muted); font-size: 0.75rem; margin-top: 0.25rem; font-family: ui-monospace, monospace; }
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 1rem 1.25rem;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.25rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+        .header h1 { font-size: 1.25rem; font-weight: 600; }
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+        .conn-dot {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: var(--muted);
+            display: inline-block;
+        }
+        .conn-dot.ok { background: var(--accent); }
+        .conn-dot.err { background: var(--error); }
+
+        /* ── Cards ── */
+        .card {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 0.625rem;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+        .card-title {
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--muted);
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .card-title .badge {
+            font-size: 0.65rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.2rem;
+            background: #27272a;
+            color: var(--accent);
+            font-family: ui-monospace, monospace;
+            text-transform: none;
+            letter-spacing: 0;
+        }
+        .card-title .badge.warn { color: var(--warn); background: #422006; }
+        .card-title .badge.info { color: var(--info); background: #1e1b4b; }
+        .card-title .badge.err { color: var(--error); background: #450a0a; }
+        .card-title .badge.off { color: var(--muted); }
+
+        /* ── System resource row ── */
+        .sys-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+        .sys-item {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 0.625rem;
+            padding: 0.75rem;
+            text-align: center;
+        }
+        .sys-item .label {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 0.375rem;
+        }
+
+        /* ── SVG ring ── */
+        .ring-wrap {
+            position: relative;
+            width: 72px;
+            height: 72px;
+            margin: 0 auto 0.25rem;
+        }
+        .ring-wrap svg { transform: rotate(-90deg); }
+        .ring-track { fill: none; stroke: var(--ring-bg); stroke-width: 6; }
+        .ring-fill { fill: none; stroke-width: 6; stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
+        .ring-label {
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.9rem;
+            font-weight: 600;
+            font-family: ui-monospace, monospace;
+        }
+
+        /* ── Memory bar ── */
+        .mem-bar-wrap { margin-bottom: 0.25rem; }
+        .mem-bar {
+            height: 18px;
+            border-radius: 4px;
+            overflow: hidden;
+            display: flex;
+            background: var(--bar-bg);
+        }
+        .mem-bar > div {
+            height: 100%;
+            transition: width 0.5s ease;
+            position: relative;
+            min-width: 2px;
+        }
+        .mem-bar > div:first-child { border-radius: 4px 0 0 4px; }
+        .mem-bar > div:last-child { border-radius: 0 4px 4px 0; }
+        .mem-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin-top: 0.375rem;
+        }
+        .mem-legend span::before {
+            content: '';
+            display: inline-block;
+            width: 8px; height: 8px;
+            border-radius: 2px;
+            margin-right: 4px;
+            vertical-align: middle;
+        }
+
+        /* ── Sparkline canvas ── */
+        .sparkline-wrap {
+            width: 100%;
+            height: 36px;
+            margin-top: 0.25rem;
+        }
+        .sparkline-wrap canvas { width: 100%; height: 100%; display: block; }
+
+        /* ── Model cards ── */
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+            gap: 0.75rem;
+        }
+        .model-card {
+            background: var(--card);
+            border: 1px solid var(--card-border);
+            border-radius: 0.625rem;
+            overflow: hidden;
+        }
+        .model-card.busy { border-left: 3px solid var(--accent); }
+        .model-head {
+            padding: 0.75rem 1rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            cursor: pointer;
+            user-select: none;
+        }
+        .model-head:hover { background: rgba(255,255,255,0.02); }
+        .model-name {
+            font-size: 0.85rem;
+            font-weight: 600;
+            font-family: ui-monospace, monospace;
+        }
+        .model-head-right {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.7rem;
+            color: var(--muted);
+        }
+        .model-body { padding: 0 1rem 0.75rem; }
+        .model-body.collapsed { display: none; }
+        .metric-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.2rem 0;
+            font-size: 0.8rem;
+            font-family: ui-monospace, monospace;
+        }
+        .metric-row .val { color: var(--accent); }
+
+        /* ── Progress bar ── */
+        .progress-bar {
+            height: 6px;
+            background: var(--bar-bg);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 0.25rem 0;
+        }
+        .progress-bar > div {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.4s ease;
+            background: var(--accent);
+        }
+
+        /* ── Slots ── */
+        .slot {
+            padding: 0.5rem;
+            background: #111116;
+            border-radius: 0.375rem;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .slot.busy { border-left: 3px solid var(--accent); }
+        .slot-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .slot-progress {
+            color: var(--muted);
+            font-size: 0.7rem;
+            margin-top: 0.2rem;
+            font-family: ui-monospace, monospace;
+        }
+        .slot-generated {
+            margin-top: 0.375rem;
+            padding: 0.4rem;
+            background: var(--card);
+            border-radius: 0.25rem;
+            font-family: ui-monospace, monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            max-height: 260px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--text);
+            border: 1px solid var(--card-border);
+        }
+        .slot-thinking {
+            margin-top: 0.375rem;
+            padding: 0.4rem;
+            background: #111118;
+            border-radius: 0.25rem;
+            font-family: ui-monospace, monospace;
+            font-size: 0.75rem;
+            line-height: 1.4;
+            max-height: 180px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--muted);
+            border-left: 3px solid var(--info);
+        }
+        .slot-thinking-title {
+            font-size: 0.65rem;
+            color: var(--info);
+            margin-bottom: 0.15rem;
+            text-transform: uppercase;
+        }
         .slot-hint { color: var(--warn); }
-        .slot-generated { margin-top: 0.5rem; padding: 0.5rem; background: #1a1a1f; border-radius: 0.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.4; max-height: 300px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--text); border: 1px solid #333; }
-        .slot-thinking { margin-top: 0.5rem; padding: 0.5rem; background: #1e1e24; border-radius: 0.25rem; font-family: ui-monospace, monospace; font-size: 0.8rem; line-height: 1.4; max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-word; color: var(--muted); border-left: 3px solid #6366f1; }
-        .slot-thinking-title { font-size: 0.7rem; color: #6366f1; margin-bottom: 0.25rem; text-transform: uppercase; }
-        .slot-muted { color: var(--muted); }
-        .error { color: #ef4444; font-size: 0.875rem; }
-        .refresh { color: var(--muted); font-size: 0.75rem; margin-top: 0.5rem; }
-        .model-badge { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 0.25rem; background: #27272a; color: var(--accent); font-size: 0.75rem; font-family: ui-monospace, monospace; margin-left: 0.5rem; }
-        .queue-badge { display: none; padding: 0.15rem 0.5rem; border-radius: 0.25rem; background: #422006; color: var(--warn); font-size: 0.75rem; font-family: ui-monospace, monospace; margin-left: 0.25rem; }
-        .queue-badge.active { display: inline-block; }
+
+        /* ── Ollama ── */
+        .ollama-model {
+            padding: 0.5rem;
+            background: #111116;
+            border-radius: 0.375rem;
+            margin-top: 0.5rem;
+            font-size: 0.8rem;
+        }
+        .ollama-model .name { font-family: ui-monospace, monospace; font-weight: 600; }
+        .ollama-model .detail {
+            font-size: 0.7rem;
+            color: var(--muted);
+            margin-top: 0.2rem;
+        }
+        .avail-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.4rem;
+            margin-top: 0.5rem;
+        }
+        .avail-tag {
+            padding: 0.15rem 0.5rem;
+            background: #27272a;
+            border-radius: 0.25rem;
+            font-size: 0.7rem;
+            font-family: ui-monospace, monospace;
+            color: var(--muted);
+        }
+
+        .error-text { color: var(--error); font-size: 0.8rem; }
+        .muted-text { color: var(--muted); font-size: 0.75rem; }
+        .section-gap { margin-top: 1rem; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .loading { animation: pulse 1.5s ease-in-out infinite; color: var(--muted); }
     </style>
 </head>
 <body>
-    <h1>LLM 监控 <span class="model-badge" id="currentModelBadge">-</span><span class="queue-badge" id="queueBadge"></span></h1>
-
-    <div class="nav">
-        <a href="/monitor.html" class="active">监控</a>
-        <a href="/chat.html">Chat 流式</a>
-    </div>
-
-    <div class="card">
-        <h2>配置</h2>
-        <div class="config-row">
-            <select id="modelSelect">
-                <option value="">加载中...</option>
-            </select>
-            <input type="text" id="apiBase" placeholder="API 地址（留空使用代理）" style="display:none">
-            <button onclick="saveConfig()">刷新</button>
-            <button class="secondary" onclick="resetConfig()">重置</button>
-        </div>
-        <p class="refresh">选择模型后自动通过代理路由。推理时 /metrics、/slots 会阻塞，轮询已降频以避免服务卡死。</p>
-    </div>
-
-    <div class="card">
-        <h2>健康状态</h2>
-        <div class="metric">
-            <span><span class="status" id="healthDot"></span>服务</span>
-            <span id="healthText">-</span>
+    <div class="header">
+        <h1>LLM 监控</h1>
+        <div class="header-right">
+            <span><span class="conn-dot" id="connDot"></span> <span id="connText">连接中</span></span>
+            <span id="lastUpdate">-</span>
         </div>
     </div>
 
-    <div class="card">
-        <h2>推理指标</h2>
-        <div id="metrics"></div>
+    <!-- System resources -->
+    <div class="sys-row" id="sysRow">
+        <div class="sys-item">
+            <div class="label">CPU</div>
+            <div class="ring-wrap">
+                <svg viewBox="0 0 72 72" width="72" height="72">
+                    <circle class="ring-track" cx="36" cy="36" r="30"/>
+                    <circle class="ring-fill" id="cpuRing" cx="36" cy="36" r="30" stroke="var(--accent)"/>
+                </svg>
+                <div class="ring-label" id="cpuLabel">-</div>
+            </div>
+            <div class="sparkline-wrap"><canvas id="cpuSpark"></canvas></div>
+        </div>
+        <div class="sys-item">
+            <div class="label">内存</div>
+            <div class="ring-wrap">
+                <svg viewBox="0 0 72 72" width="72" height="72">
+                    <circle class="ring-track" cx="36" cy="36" r="30"/>
+                    <circle class="ring-fill" id="memRing" cx="36" cy="36" r="30" stroke="var(--info)"/>
+                </svg>
+                <div class="ring-label" id="memLabel">-</div>
+            </div>
+            <div class="sparkline-wrap"><canvas id="memSpark"></canvas></div>
+        </div>
+        <div class="sys-item">
+            <div class="label">Load Average</div>
+            <div style="font-family:ui-monospace,monospace;font-size:1.1rem;font-weight:600;margin:0.75rem 0 0.25rem" id="loadAvg">-</div>
+            <div class="muted-text" id="loadDetail">1m / 5m / 15m</div>
+        </div>
     </div>
 
-    <div class="card">
-        <h2>槽位状态</h2>
-        <div id="slots"></div>
+    <!-- Unified memory bar -->
+    <div class="card" id="memBarCard">
+        <div class="card-title">统一内存分布 <span class="badge" id="memTotalBadge">-</span></div>
+        <div class="mem-bar-wrap">
+            <div class="mem-bar" id="memBar"></div>
+        </div>
+        <div class="mem-legend" id="memLegend"></div>
     </div>
 
-    <p class="refresh" id="lastUpdate">-</p>
+    <!-- llama-server section -->
+    <div id="llamaSection">
+        <div class="card-title" style="padding:0 0 0.5rem">
+            llama-server
+            <span class="badge" id="llamaCount">0 个模型</span>
+            <span class="badge" id="globalGate">-</span>
+        </div>
+        <div class="model-grid" id="llamaGrid">
+            <div class="muted-text loading">加载中...</div>
+        </div>
+    </div>
+
+    <!-- Ollama section -->
+    <div class="section-gap" id="ollamaSection">
+        <div class="card-title" style="padding:0 0 0.5rem">
+            Ollama
+            <span class="badge" id="ollamaStatus">-</span>
+            <span class="badge info" id="ollamaVersion">-</span>
+        </div>
+        <div class="card" id="ollamaCard">
+            <div class="muted-text loading">加载中...</div>
+        </div>
+    </div>
 
     <script>
-        function escapeHtml(str) {
-            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    const ORIGIN = window.location.origin || 'http://localhost:8888';
+    const CIRC = 2 * Math.PI * 30;
+    const SPARK_MAX = 60;
+    const POLL_SYS = 5000;
+    const POLL_MODELS = 10000;
+    const POLL_INFER_IDLE = 10000;
+    const POLL_INFER_BUSY = 3000;
+    const MONITOR_TIMEOUT = 10000;
+
+    const sparkData = { cpu: [], mem: [] };
+    let modelsData = { models: [], ollama: null, global: {} };
+    let hasProcessing = false;
+    let timers = {};
+    let expandedModels = new Set();
+
+    // ── Utilities ──
+
+    function escapeHtml(s) {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function parseThinkingAndContent(gen) {
+        const m = gen.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
+        const thinking = m ? m[1].trim() : '';
+        const after = m ? gen.slice(gen.indexOf(m[0]) + m[0].length) : gen;
+        const content = after.replace(/^[\s\n]+/, '').trim();
+        return { thinking, content };
+    }
+
+    function fmtGB(v) { return v >= 1024 ? (v/1024).toFixed(1) + 'T' : v.toFixed(1) + 'G'; }
+
+    function fetchJ(url, timeout) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeout || MONITOR_TIMEOUT);
+        return fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } })
+            .then(r => { if (!r.ok) throw new Error(r.status); return r.json(); })
+            .finally(() => clearTimeout(t));
+    }
+
+    function fetchText(url, timeout) {
+        const ctrl = new AbortController();
+        const t = setTimeout(() => ctrl.abort(), timeout || MONITOR_TIMEOUT);
+        return fetch(url, { signal: ctrl.signal })
+            .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+            .finally(() => clearTimeout(t));
+    }
+
+    // ── SVG Ring ──
+
+    function setRing(id, pct, color) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        const offset = CIRC * (1 - Math.min(pct, 100) / 100);
+        el.style.strokeDasharray = CIRC;
+        el.style.strokeDashoffset = offset;
+        if (color) el.style.stroke = color;
+    }
+
+    function ringColor(pct) {
+        if (pct > 85) return 'var(--error)';
+        if (pct > 65) return 'var(--warn)';
+        return 'var(--accent)';
+    }
+
+    // ── Sparkline ──
+
+    function pushSpark(key, val) {
+        sparkData[key].push(val);
+        if (sparkData[key].length > SPARK_MAX) sparkData[key].shift();
+    }
+
+    function drawSpark(canvasId, data, color) {
+        const canvas = document.getElementById(canvasId);
+        if (!canvas || !data.length) return;
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(dpr, dpr);
+        const w = rect.width, h = rect.height;
+        ctx.clearRect(0, 0, w, h);
+        const max = 100;
+        const step = w / (SPARK_MAX - 1);
+        ctx.beginPath();
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.lineJoin = 'round';
+        for (let i = 0; i < data.length; i++) {
+            const x = i * step;
+            const y = h - (data[i] / max) * h;
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
         }
-        function parseThinkingAndContent(gen) {
-            const thinkMatch = gen.match(/<think>([\s\S]*?)(?:<\/think>|$)/);
-            const thinking = thinkMatch ? thinkMatch[1].trim() : '';
-            const afterThink = thinkMatch ? gen.slice(gen.indexOf(thinkMatch[0]) + thinkMatch[0].length) : gen;
-            const content = afterThink.replace(/^[\s\n]+/, '').trim();
-            return { thinking, content };
+        ctx.stroke();
+        // fill area
+        ctx.lineTo((data.length - 1) * step, h);
+        ctx.lineTo(0, h);
+        ctx.closePath();
+        ctx.fillStyle = color.replace(')', ', 0.08)').replace('rgb', 'rgba');
+        ctx.fill();
+    }
+
+    // ── System resources ──
+
+    async function fetchSystem() {
+        try {
+            const d = await fetchJ(ORIGIN + '/api/system');
+            const cpuUsed = +(d.cpu.user + d.cpu.sys).toFixed(1);
+            document.getElementById('cpuLabel').textContent = cpuUsed + '%';
+            setRing('cpuRing', cpuUsed, ringColor(cpuUsed));
+            pushSpark('cpu', cpuUsed);
+            drawSpark('cpuSpark', sparkData.cpu, 'rgb(34,197,94)');
+
+            const memPct = d.memory.total_gb > 0 ? +((d.memory.used_gb / d.memory.total_gb) * 100).toFixed(1) : 0;
+            document.getElementById('memLabel').textContent = memPct + '%';
+            setRing('memRing', memPct, ringColor(memPct));
+            pushSpark('mem', memPct);
+            drawSpark('memSpark', sparkData.mem, 'rgb(99,102,241)');
+
+            document.getElementById('loadAvg').textContent = d.load_avg.map(v => v.toFixed(2)).join('  ');
+
+            renderMemBar(d);
+
+            document.getElementById('connDot').className = 'conn-dot ok';
+            document.getElementById('connText').textContent = '已连接';
+        } catch (e) {
+            document.getElementById('connDot').className = 'conn-dot err';
+            document.getElementById('connText').textContent = '断开';
+        }
+        document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString('zh-CN');
+        schedulePoll('sys', fetchSystem, POLL_SYS);
+    }
+
+    function renderMemBar(sysData) {
+        const total = sysData.memory.total_gb || 1;
+        const segments = [];
+        const colors = ['#6366f1', '#8b5cf6', '#a855f7', '#d946ef', '#ec4899', '#f43f5e', '#22c55e', '#14b8a6'];
+        let colorIdx = 0;
+        let accounted = 0;
+
+        // llama-server processes
+        for (const p of (sysData.processes.llama_server || [])) {
+            const c = colors[colorIdx++ % colors.length];
+            segments.push({ label: p.model || ('llama:' + p.pid), gb: p.rss_gb, color: c });
+            accounted += p.rss_gb;
+        }
+        // Ollama processes
+        let ollamaTotal = 0;
+        for (const p of (sysData.processes.ollama || [])) ollamaTotal += p.rss_gb;
+        if (ollamaTotal > 0.01) {
+            segments.push({ label: 'Ollama', gb: ollamaTotal, color: '#f97316' });
+            accounted += ollamaTotal;
+        }
+        // Other used
+        const otherUsed = Math.max(0, sysData.memory.used_gb - accounted);
+        if (otherUsed > 0.5) {
+            segments.push({ label: '系统 + 其他', gb: otherUsed, color: '#52525b' });
+        }
+        // Free
+        segments.push({ label: '可用', gb: sysData.memory.free_gb, color: '#27272a' });
+
+        const bar = document.getElementById('memBar');
+        bar.innerHTML = '';
+        for (const s of segments) {
+            const pct = (s.gb / total) * 100;
+            if (pct < 0.1) continue;
+            const div = document.createElement('div');
+            div.style.width = pct + '%';
+            div.style.background = s.color;
+            div.title = s.label + ': ' + fmtGB(s.gb);
+            bar.appendChild(div);
         }
 
-        let hasProcessing = false;
-        let pollTimer = null;
-        let currentModel = localStorage.getItem('llm_current_model') || '';
-        let modelsLoaded = false;
-        let modelsData = [];
-        const POLL_FAST = 12000;
-        const POLL_IDLE = 10000;
+        const legend = document.getElementById('memLegend');
+        legend.innerHTML = segments.filter(s => s.gb > 0.1).map(s =>
+            `<span style="--c:${s.color}"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${s.color};margin-right:4px;vertical-align:middle"></span>${s.label} ${fmtGB(s.gb)}</span>`
+        ).join('');
+        document.getElementById('memTotalBadge').textContent = fmtGB(total) + ' 总计';
+    }
 
-        function headers() {
-            return { 'Accept': 'application/json, text/plain' };
+    // ── Models + Ollama ──
+
+    async function fetchModels() {
+        try {
+            modelsData = await fetchJ(ORIGIN + '/api/models');
+        } catch(e) {
+            // keep old data
+        }
+        renderLlamaSection();
+        renderOllamaSection();
+        schedulePoll('models', fetchModels, POLL_MODELS);
+    }
+
+    function renderLlamaSection() {
+        const models = modelsData.models || [];
+        const g = modelsData.global || {};
+        document.getElementById('llamaCount').textContent = models.length + ' 个模型';
+        document.getElementById('globalGate').textContent = `并发 ${g.active||0}/${g.max||'-'}`;
+
+        const grid = document.getElementById('llamaGrid');
+        if (!models.length) {
+            grid.innerHTML = '<div class="muted-text">无运行中的 llama-server 模型</div>';
+            return;
+        }
+        grid.innerHTML = '';
+        for (const m of models) {
+            const card = document.createElement('div');
+            card.className = 'model-card';
+            card.id = 'mc-' + m.name;
+            const expanded = expandedModels.has(m.name);
+            card.innerHTML = `
+                <div class="model-head" onclick="toggleModel('${m.name}')">
+                    <span class="model-name">${escapeHtml(m.model || m.name)}</span>
+                    <span class="model-head-right">
+                        <span>:${m.port}</span>
+                        <span class="conn-dot" id="health-${m.name}"></span>
+                        <span id="slots-summary-${m.name}">-</span>
+                        ${m.queue > 0 ? `<span class="badge warn">排队 ${m.queue}</span>` : ''}
+                    </span>
+                </div>
+                <div class="model-body ${expanded ? '' : 'collapsed'}" id="body-${m.name}">
+                    ${renderBudgetBar(m)}
+                    <div id="metrics-${m.name}" class="muted-text" style="font-size:0.75rem">加载中...</div>
+                    <div id="slots-${m.name}"></div>
+                </div>
+            `;
+            grid.appendChild(card);
+        }
+        fetchAllModelDetails();
+    }
+
+    function renderBudgetBar(m) {
+        if (!m.budget) return '';
+        const pct = m.budget.total > 0 ? ((m.budget.used / m.budget.total) * 100).toFixed(1) : 0;
+        return `<div style="margin-bottom:0.5rem">
+            <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--muted);margin-bottom:0.15rem">
+                <span>KV Cache</span>
+                <span>${(m.budget.used/1024).toFixed(0)}K / ${(m.budget.total/1024).toFixed(0)}K tokens (${pct}%)</span>
+            </div>
+            <div class="progress-bar"><div style="width:${pct}%;background:var(--info)"></div></div>
+        </div>`;
+    }
+
+    function toggleModel(name) {
+        const body = document.getElementById('body-' + name);
+        if (!body) return;
+        if (body.classList.contains('collapsed')) {
+            body.classList.remove('collapsed');
+            expandedModels.add(name);
+        } else {
+            body.classList.add('collapsed');
+            expandedModels.delete(name);
+        }
+    }
+
+    // ── Per-model detail fetch ──
+
+    const METRIC_LABELS = {
+        'llamacpp:prompt_tokens_seconds': 'Prompt 吞吐',
+        'llamacpp:predicted_tokens_seconds': '生成吞吐',
+        'llamacpp:prompt_tokens_total': 'Prompt Tokens',
+        'llamacpp:tokens_predicted_total': '生成 Tokens',
+        'llamacpp:requests_processing': '处理中请求',
+        'llamacpp:requests_deferred': '排队请求',
+        'llamacpp:n_tokens_max': '最大上下文',
+    };
+
+    function parseMetrics(text) {
+        const m = {};
+        for (const line of text.split('\n')) {
+            if (!line.startsWith('llamacpp:')) continue;
+            const match = line.match(/^(llamacpp:[^\s{]+)\s*(?:\{[^}]*\})?\s+([\d.e+-]+)/);
+            if (match) m[match[1]] = parseFloat(match[2]);
+        }
+        return m;
+    }
+
+    async function fetchAllModelDetails() {
+        const models = modelsData.models || [];
+        hasProcessing = false;
+        await Promise.allSettled(models.map(m => fetchModelDetail(m)));
+        schedulePoll('infer', fetchAllModelDetails, hasProcessing ? POLL_INFER_BUSY : POLL_INFER_IDLE);
+    }
+
+    async function fetchModelDetail(m) {
+        const base = ORIGIN + '/api/' + m.name;
+
+        // health
+        try {
+            const hr = await fetch(base + '/health', { signal: AbortSignal.timeout(MONITOR_TIMEOUT) });
+            const dot = document.getElementById('health-' + m.name);
+            if (dot) dot.className = 'conn-dot ' + (hr.ok ? 'ok' : 'err');
+        } catch(e) {
+            const dot = document.getElementById('health-' + m.name);
+            if (dot) dot.className = 'conn-dot err';
         }
 
-        // 加载运行中的模型列表
-        async function loadModels() {
-            const select = document.getElementById('modelSelect');
-            try {
-                const origin = window.location.origin || 'http://localhost:8888';
-                const resp = await fetch(origin + '/api/models', { headers: headers() });
-                if (resp.ok) {
-                    const data = await resp.json();
-                    // serve-ui 返回 { models: [...], global: ... }；旧版为纯数组
-                    const models = Array.isArray(data)
-                        ? data
-                        : (data.models || []);
-                    modelsData = models;
-                    select.innerHTML = '';
-                    if (models.length === 0) {
-                        select.innerHTML = '<option value="">无运行中的模型</option>';
-                        currentModel = '';
+        // metrics
+        try {
+            const text = await fetchText(base + '/metrics');
+            const parsed = parseMetrics(text);
+            const el = document.getElementById('metrics-' + m.name);
+            if (el) {
+                const rows = Object.entries(METRIC_LABELS)
+                    .filter(([k]) => k in parsed)
+                    .map(([k, label]) => {
+                        let v = parsed[k];
+                        const unit = label.includes('吞吐') ? ' t/s' : '';
+                        const display = (typeof v === 'number' && v % 1) ? v.toFixed(2) : v;
+                        return `<div class="metric-row"><span>${label}</span><span class="val">${display}${unit}</span></div>`;
+                    }).join('');
+                el.innerHTML = rows || '<div class="muted-text">无指标数据</div>';
+            }
+        } catch(e) {
+            const el = document.getElementById('metrics-' + m.name);
+            if (el) el.innerHTML = '<div class="muted-text">指标获取超时（推理中）</div>';
+        }
+
+        // slots
+        try {
+            const slots = await fetchJ(base + '/slots');
+            if (!Array.isArray(slots)) return;
+            const busy = slots.filter(s => s.is_processing).length;
+            if (busy > 0) hasProcessing = true;
+            const card = document.getElementById('mc-' + m.name);
+            if (card) { if (busy > 0) card.classList.add('busy'); else card.classList.remove('busy'); }
+            const summary = document.getElementById('slots-summary-' + m.name);
+            if (summary) summary.textContent = `${busy}/${slots.length} 槽位`;
+            // auto-expand if busy
+            if (busy > 0 && !expandedModels.has(m.name)) {
+                expandedModels.add(m.name);
+                const body = document.getElementById('body-' + m.name);
+                if (body) body.classList.remove('collapsed');
+            }
+            const container = document.getElementById('slots-' + m.name);
+            if (!container) return;
+            container.innerHTML = slots.map(s => renderSlot(s)).join('');
+            container.querySelectorAll('.slot-generated, .slot-thinking').forEach(el => { el.scrollTop = el.scrollHeight; });
+        } catch(e) {
+            const container = document.getElementById('slots-' + m.name);
+            if (container) container.innerHTML = '<div class="muted-text" style="margin-top:0.5rem">槽位获取超时（推理中）</div>';
+        }
+    }
+
+    function renderSlot(s) {
+        if (!s.is_processing) {
+            return `<div class="slot"><span class="slot-header">#${s.id} 空闲</span></div>`;
+        }
+        const nt = Array.isArray(s.next_token) ? s.next_token[0] : (s.next_token || {});
+        const decoded = nt.n_decoded ?? '?';
+        const remain = nt.n_remain ?? '?';
+        const maxP = s.params?.n_predict;
+        const total = (decoded !== '?' && remain !== '?' && remain >= 0) ? decoded + remain : (maxP || 0);
+        const pct = total > 0 && decoded !== '?' ? ((decoded / total) * 100).toFixed(1) : 0;
+
+        let progress = `已生成 ${decoded} tokens`;
+        if (remain !== '?' && remain >= 0) progress += ` / 剩余 ${remain}`;
+        if (maxP !== undefined) progress += ` (max=${maxP})`;
+
+        const gen = s.generated ?? s.generated_text ?? s.output ?? s.content ?? '';
+        const reasoning = s.reasoning ?? s.reasoning_content ?? '';
+        let genHtml = '';
+        if (gen || reasoning) {
+            const { thinking, content } = parseThinkingAndContent(gen);
+            const showThinking = reasoning || thinking;
+            const showContent = content || (!showThinking && gen);
+            if (showThinking) genHtml += `<div class="slot-thinking"><div class="slot-thinking-title">思考</div>${escapeHtml(reasoning || thinking)}</div>`;
+            if (showContent) genHtml += `<div class="slot-generated">${escapeHtml(content || gen)}</div>`;
+            else if (showThinking) genHtml += `<div class="slot-generated muted-text">回复生成中...</div>`;
+        } else if (decoded !== '?' && decoded > 0) {
+            genHtml = `<div class="slot-progress slot-hint">需启用 slots_debug 查看生成内容</div>`;
+        } else {
+            genHtml = `<div class="slot-progress">等待生成...</div>`;
+        }
+
+        return `<div class="slot busy">
+            <div class="slot-header"><span>#${s.id} 处理中</span></div>
+            <div class="progress-bar" style="margin:0.3rem 0"><div style="width:${pct}%"></div></div>
+            <div class="slot-progress">${progress}</div>
+            ${genHtml}
+        </div>`;
+    }
+
+    // ── Ollama section ──
+
+    function renderOllamaSection() {
+        const o = modelsData.ollama;
+        const statusBadge = document.getElementById('ollamaStatus');
+        const verBadge = document.getElementById('ollamaVersion');
+        const card = document.getElementById('ollamaCard');
+
+        if (!o || o.status !== 'running') {
+            statusBadge.textContent = '离线';
+            statusBadge.className = 'badge off';
+            verBadge.textContent = '';
+            card.innerHTML = '<div class="muted-text">Ollama 服务未检测到</div>';
+            return;
+        }
+
+        statusBadge.textContent = '运行中';
+        statusBadge.className = 'badge';
+        verBadge.textContent = 'v' + (o.version || '?');
+
+        let html = '';
+
+        // Loaded models
+        if (o.loaded && o.loaded.length) {
+            html += '<div class="card-title" style="margin-top:0">已加载模型</div>';
+            for (const m of o.loaded) {
+                const vramPct = m.size_gb > 0 ? ((m.vram_gb / m.size_gb) * 100).toFixed(0) : 0;
+                let expiry = '';
+                if (m.expires_at) {
+                    const remaining = Math.max(0, (new Date(m.expires_at) - Date.now()) / 1000);
+                    if (remaining > 0) {
+                        const min = Math.floor(remaining / 60);
+                        const sec = Math.floor(remaining % 60);
+                        expiry = `${min}分${sec}秒后卸载`;
                     } else {
-                        models.forEach(m => {
-                            const opt = document.createElement('option');
-                            opt.value = m.name;
-                            opt.textContent = `${m.model || m.name} (:${m.port})`;
-                            opt.title = `路由: /api/${m.name}/*  请求体 model: ${m.model || m.name}`;
-                            select.appendChild(opt);
-                        });
-                        if (currentModel && models.some(m => m.name === currentModel)) {
-                            select.value = currentModel;
-                        } else {
-                            currentModel = models[0].name;
-                            select.value = currentModel;
-                        }
+                        expiry = '即将卸载';
                     }
-                    modelsLoaded = true;
                 }
-            } catch (e) {
-                select.innerHTML = '<option value="">连接失败</option>';
+                html += `<div class="ollama-model">
+                    <div class="name">${escapeHtml(m.name)}</div>
+                    <div class="detail">
+                        模型大小: ${fmtGB(m.size_gb)} &nbsp;|&nbsp; VRAM: ${fmtGB(m.vram_gb)}
+                        ${m.quantization ? ' &nbsp;|&nbsp; ' + escapeHtml(m.quantization) : ''}
+                        ${expiry ? ' &nbsp;|&nbsp; <span style="color:var(--warn)">' + expiry + '</span>' : ''}
+                    </div>
+                    <div style="margin-top:0.3rem">
+                        <div style="display:flex;justify-content:space-between;font-size:0.65rem;color:var(--muted);margin-bottom:0.1rem">
+                            <span>VRAM 使用</span><span>${vramPct}%</span>
+                        </div>
+                        <div class="progress-bar"><div style="width:${vramPct}%;background:#f97316"></div></div>
+                    </div>
+                </div>`;
             }
-            updateModelBadge();
+        } else {
+            html += '<div class="muted-text">无已加载模型（按需加载）</div>';
         }
 
-        function updateModelBadge() {
-            document.getElementById('currentModelBadge').textContent = currentModel || '-';
-            const badge = document.getElementById('queueBadge');
-            const m = modelsData.find(x => x.name === currentModel);
-            const depth = m && m.queue ? m.queue : 0;
-            if (depth > 0) {
-                badge.textContent = `排队 ${depth}`;
-                badge.classList.add('active');
-            } else {
-                badge.textContent = '';
-                badge.classList.remove('active');
+        // Available models
+        if (o.available && o.available.length) {
+            html += '<div class="card-title" style="margin-top:0.75rem">可用模型</div>';
+            html += '<div class="avail-list">';
+            for (const m of o.available) {
+                const loaded = o.loaded && o.loaded.some(l => l.name === m.name);
+                html += `<div class="avail-tag" ${loaded ? 'style="color:var(--accent);border:1px solid var(--accent-dim)"' : ''}>
+                    ${escapeHtml(m.name)} (${fmtGB(m.size_gb)})
+                    ${m.quantization ? ' ' + m.quantization : ''}
+                </div>`;
             }
+            html += '</div>';
         }
 
-        function apiUrl(path) {
-            const origin = window.location.origin || 'http://localhost:8888';
-            if (currentModel) {
-                return origin + '/api/' + currentModel + path;
-            }
-            return origin + '/api' + path;
+        card.innerHTML = html;
+    }
+
+    // ── Polling scheduler ──
+
+    function schedulePoll(key, fn, interval) {
+        if (timers[key]) clearTimeout(timers[key]);
+        if (document.hidden) return;
+        timers[key] = setTimeout(fn, interval);
+    }
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            Object.keys(timers).forEach(k => { clearTimeout(timers[k]); timers[k] = null; });
+        } else {
+            fetchSystem();
+            fetchModels();
         }
+    });
 
-        function saveConfig() {
-            const select = document.getElementById('modelSelect');
-            currentModel = select.value;
-            localStorage.setItem('llm_current_model', currentModel);
-            updateModelBadge();
-            fetchAll();
-        }
+    // ── Init ──
 
-        function resetConfig() {
-            localStorage.removeItem('llm_current_model');
-            currentModel = '';
-            loadModels().then(() => fetchAll());
-        }
+    fetchSystem();
+    fetchModels();
 
-        document.getElementById('modelSelect').addEventListener('change', function() {
-            currentModel = this.value;
-            localStorage.setItem('llm_current_model', currentModel);
-            updateModelBadge();
-            fetchAll();
-        });
-
-        function parseMetrics(text) {
-            const m = {};
-            for (const line of text.split('\n')) {
-                if (line.startsWith('llamacpp:')) {
-                    const match = line.match(/^(llamacpp:[^\s{]+)\s*(?:\{[^}]*\})?\s+([\d.e+-]+)/);
-                    if (match) m[match[1]] = parseFloat(match[2]);
-                }
-            }
-            return m;
-        }
-
-        const LABELS = {
-            'llamacpp:prompt_tokens_total': 'Prompt Tokens',
-            'llamacpp:tokens_predicted_total': '生成 Tokens',
-            'llamacpp:prompt_tokens_seconds': 'Prompt 吞吐 (tokens/s)',
-            'llamacpp:predicted_tokens_seconds': '生成吞吐 (tokens/s)',
-            'llamacpp:prompt_seconds_total': 'Prompt 总耗时 (s)',
-            'llamacpp:tokens_predicted_seconds_total': '生成总耗时 (s)',
-            'llamacpp:n_decode_total': '解码总次数',
-            'llamacpp:requests_processing': '处理中请求',
-            'llamacpp:requests_deferred': '排队请求',
-            'llamacpp:n_busy_slots_per_decode': '忙碌槽位/解码',
-            'llamacpp:n_tokens_max': '最大上下文',
-        };
-
-        const MONITOR_TIMEOUT_MS = 10000;
-        const BLOCKED_HINT = '推理中，监控接口被阻塞，请稍后刷新';
-        function fetchWithTimeout(url, opts, ms = MONITOR_TIMEOUT_MS) {
-            const ctrl = new AbortController();
-            const timer = setTimeout(() => ctrl.abort(), ms);
-            return fetch(url, { ...opts, signal: ctrl.signal }).finally(() => clearTimeout(timer));
-        }
-
-        function errMsg(e) {
-            if (!e) return BLOCKED_HINT;
-            if (e.name === 'AbortError') return BLOCKED_HINT;
-            const msg = (e.message || '').toLowerCase();
-            if (msg.includes('abort') || msg.includes('aborted')) return BLOCKED_HINT;
-            return e.message || BLOCKED_HINT;
-        }
-
-        let firstLoad = true;
-        async function fetchAll() {
-            if (!modelsLoaded) {
-                await loadModels();
-            }
-
-            const scrollY = window.scrollY;
-
-            if (firstLoad) {
-                document.getElementById('metrics').innerHTML = '<div class="metric slot-muted">加载中...</div>';
-                document.getElementById('slots').innerHTML = '<div class="metric slot-muted">加载中...</div>';
-            }
-
-            const [healthResult, metricsResult, slotsResult] = await Promise.allSettled([
-                fetchWithTimeout(apiUrl('/health'), { headers: headers() }),
-                fetchWithTimeout(apiUrl('/metrics'), { headers: headers() }),
-                fetchWithTimeout(apiUrl('/slots'), { headers: headers() })
-            ]);
-
-            if (healthResult.status === 'fulfilled') {
-                const healthRes = healthResult.value;
-                document.getElementById('healthDot').className = 'status ' + (healthRes.ok ? 'ok' : 'err');
-                document.getElementById('healthText').textContent = healthRes.ok ? '正常' : `错误 ${healthRes.status}`;
-            } else {
-                document.getElementById('healthDot').className = 'status err';
-                document.getElementById('healthText').textContent = errMsg(healthResult.reason);
-            }
-
-            if (metricsResult.status === 'fulfilled') {
-                const metricsRes = metricsResult.value;
-                if (metricsRes.ok) {
-                    const text = await metricsRes.text();
-                    const m = parseMetrics(text);
-                    document.getElementById('metrics').innerHTML = Object.entries(LABELS)
-                        .filter(([k]) => k in m)
-                        .map(([k, label]) => `<div class="metric"><span>${label}</span><span>${typeof m[k] === 'number' && m[k] % 1 ? m[k].toFixed(2) : m[k]}</span></div>`)
-                        .join('') || '<div class="metric"><span>无数据</span></div>';
-                } else {
-                    const msg = metricsRes.status === 504 ? BLOCKED_HINT : (metricsRes.status === 401 ? '需认证' : `获取失败 (${metricsRes.status})`);
-                    document.getElementById('metrics').innerHTML = `<div class="error">${msg}</div>`;
-                }
-            }
-
-            if (slotsResult.status === 'fulfilled') {
-                const slotsRes = slotsResult.value;
-                if (slotsRes.ok) {
-                    try {
-                        const slots = await slotsRes.json();
-                        if (Array.isArray(slots)) {
-                            hasProcessing = slots.some(s => s.is_processing);
-                            document.getElementById('slots').innerHTML = slots.map(s => {
-                                if (!s.is_processing) {
-                                    return `<div class="slot"><span class="slot-header">#${s.id} 空闲</span></div>`;
-                                }
-                                const nt = Array.isArray(s.next_token) ? s.next_token[0] : (s.next_token || {});
-                                const decoded = nt.n_decoded ?? '?';
-                                const remain = nt.n_remain ?? '?';
-                                const maxP = s.params?.n_predict;
-                                let progress = `已生成 ${decoded} tokens`;
-                                if (remain !== '?' && remain >= 0) progress += ` / 剩余 ${remain}`;
-                                if (maxP !== undefined) progress += ` (max=${maxP})`;
-                                const gen = (s.generated ?? s.generated_text ?? s.output ?? s.content ?? '') || '';
-                                const reasoning = (s.reasoning ?? s.reasoning_content ?? '') || '';
-                                let genHtml;
-                                if (gen || reasoning) {
-                                    const { thinking, content } = parseThinkingAndContent(gen);
-                                    const showThinking = reasoning || thinking;
-                                    const showContent = content || (!showThinking && gen);
-                                    const parts = [];
-                                    if (showThinking) {
-                                        parts.push(`<div class="slot-thinking"><div class="slot-thinking-title">思考</div>${escapeHtml(reasoning || thinking)}</div>`);
-                                    }
-                                    if (showContent) {
-                                        parts.push(`<div class="slot-generated">${escapeHtml(content || gen)}</div>`);
-                                    } else if (showThinking) {
-                                        parts.push(`<div class="slot-generated slot-muted">回复生成中...</div>`);
-                                    }
-                                    genHtml = parts.join('');
-                                } else if (decoded !== '?' && decoded > 0) {
-                                    genHtml = `<div class="slot-progress slot-hint">需启用 slots_debug 才能查看生成内容。请用 deploy.sh 重启服务（已设置 LLAMA_SERVER_SLOTS_DEBUG=1）</div>`;
-                                } else {
-                                    genHtml = `<div class="slot-progress">等待生成...</div>`;
-                                }
-                                return `<div class="slot busy"><div class="slot-header"><span>#${s.id} 处理中</span></div><div class="slot-progress">${progress}</div>${genHtml}</div>`;
-                            }).join('');
-                        } else {
-                            document.getElementById('slots').innerHTML = '<div class="metric"><span>无槽位数据</span></div>';
-                        }
-                    } catch (e) {
-                        document.getElementById('slots').innerHTML = `<div class="error">解析失败: ${e.message}</div>`;
-                    }
-                } else {
-                    const msg = slotsRes.status === 504 ? BLOCKED_HINT : `获取失败 (${slotsRes.status})`;
-                    document.getElementById('slots').innerHTML = `<div class="error">${msg}</div>`;
-                }
-            }
-
-            document.getElementById('lastUpdate').textContent = `上次更新: ${new Date().toLocaleTimeString('zh-CN')}`;
-            document.querySelectorAll('.slot-generated, .slot-thinking').forEach(el => { el.scrollTop = el.scrollHeight; });
-            requestAnimationFrame(() => window.scrollTo(0, scrollY));
-            firstLoad = false;
-            schedulePoll();
-        }
-
-        function schedulePoll() {
-            if (pollTimer) clearTimeout(pollTimer);
-            if (document.hidden) return;
-            pollTimer = setTimeout(fetchAll, hasProcessing ? POLL_FAST : POLL_IDLE);
-        }
-
-        document.addEventListener('visibilitychange', () => {
-            if (document.hidden) {
-                if (pollTimer) { clearTimeout(pollTimer); pollTimer = null; }
-            } else {
-                fetchAll();
-            }
-        });
-
-        // 每 30s 刷新一次模型列表（发现新模型或模型停止）
-        setInterval(() => { loadModels(); }, 30000);
-
-        fetchAll();
     </script>
 </body>
 </html>

@@ -115,7 +115,11 @@
                 const origin = window.location.origin || 'http://localhost:8888';
                 const resp = await fetch(origin + '/api/models', { headers: headers() });
                 if (resp.ok) {
-                    const models = await resp.json();
+                    const data = await resp.json();
+                    // serve-ui 返回 { models: [...], global: ... }；旧版为纯数组
+                    const models = Array.isArray(data)
+                        ? data
+                        : (data.models || []);
                     modelsData = models;
                     select.innerHTML = '';
                     if (models.length === 0) {

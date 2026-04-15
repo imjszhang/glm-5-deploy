@@ -1,0 +1,12 @@
+# 与 .gitignore 对齐；减轻 Cursor 索引与上下文体积（仓库内仍有数百 GB 权重时必配）
+models/
+llama.cpp/
+.venv/
+.venv-embed/
+work_dir/
+archives/
+logs/
+run/
+*.gguf
+*.log
+serve-ui-access.jsonl

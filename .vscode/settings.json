@@ -1,0 +1,39 @@
+{
+  "files.watcherExclude": {
+    "**/models/**": true,
+    "**/llama.cpp/**": true,
+    "**/.venv/**": true,
+    "**/.venv-embed/**": true,
+    "**/logs/**": true,
+    "**/run/**": true,
+    "**/work_dir/**": true,
+    "**/archives/**": true
+  },
+  "search.exclude": {
+    "**/models": true,
+    "**/llama.cpp": true,
+    "**/.venv": true,
+    "**/.venv-embed": true,
+    "**/logs": true,
+    "**/run": true,
+    "**/work_dir": true,
+    "**/archives": true,
+    "**/serve-ui-access.jsonl": true,
+    "**/*.gguf": true,
+    "**/*.log": true
+  },
+  "files.exclude": {
+    "**/models": true,
+    "**/llama.cpp": true,
+    "**/logs": true,
+    "**/run": true,
+    "**/work_dir": true,
+    "**/archives": true
+  },
+  "python.analysis.exclude": [
+    "**/models",
+    "**/llama.cpp",
+    "**/.venv",
+    "**/.venv-embed"
+  ]
+}

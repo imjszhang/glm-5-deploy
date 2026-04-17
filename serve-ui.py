@@ -1289,8 +1289,21 @@ def main():
 
     class ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
         daemon_threads = True
+        allow_reuse_address = True
 
-    server = ThreadingHTTPServer(("", port), ProxyHandler)
+    # 仅绑定 IPv4 时，浏览器用 "localhost" 常连到 ::1（IPv6），会表现为无法打开页面。
+    # 绑定 :: 并关闭 IPV6_V6ONLY，可同时接受 IPv4 与 IPv6 的环回访问。
+    class ThreadingHTTPServerDualStack(ThreadingHTTPServer):
+        address_family = socket.AF_INET6
+
+        def server_bind(self):
+            self.socket.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)
+            super().server_bind()
+
+    try:
+        server = ThreadingHTTPServerDualStack(("::", port), ProxyHandler)
+    except OSError:
+        server = ThreadingHTTPServer(("", port), ProxyHandler)
     try:
         server.serve_forever()
     except KeyboardInterrupt:

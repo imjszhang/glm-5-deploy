@@ -7,12 +7,16 @@
   # 或与 manage.sh download 相同参数
 
 环境:
-  DOWNLOAD_SOURCE — 未写 --source 时的默认源（默认 modelscope）
-  HF_ENDPOINT — Hugging Face Hub API；未设置且 --source huggingface 时默认为 https://hf-mirror.com
+  DOWNLOAD_SOURCE — 全局默认源（models.json 未写 download_source 且命令行未指定 --source 时为 modelscope）
+  HF_ENDPOINT — Hugging Face Hub API；走 Hugging Face 下载且未设置时默认为 https://hf-mirror.com
 
-可选 models.json 字段（对话模型）:
-  download_target_mode: \"quant_subdir\"（默认）| \"repo_root\"
-    — repo_root 时文件落到 models/<repo_name>/，再由量化 allow_patterns 带子路径（如 BF16/*），与 deploy 使用的 models/<repo_name>/<quant>/ 对齐。
+可选 models.json 字段:
+  download_source: \"modelscope\" | \"huggingface\" — 该模型的默认下载源（命令行 --source 优先）
+  hf_revision / revision: 字符串 — 仅在 Hugging Face 分支传入 snapshot_download(revision=...)
+  download_target_mode（对话）: \"quant_subdir\"（默认）| \"repo_root\"
+    — repo_root 时文件落到 models/<repo_name>/，再由量化 patterns 带子路径（如 BF16/*）。
+
+对话模型 quants 每项: \"pattern\"（单 glob）或 \"patterns\"（glob 列表，可同时匹配 GGUF 与 mmproj 等）。
 """
 from __future__ import annotations
 
@@ -79,6 +83,13 @@ def apply_hf_endpoint_default() -> None:
     )
 
 
+def _hf_revision_kwargs(cfg: dict) -> dict:
+    rev = cfg.get("hf_revision") or cfg.get("revision")
+    if rev:
+        return {"revision": str(rev)}
+    return {}
+
+
 def configure_hf_transfer() -> None:
     ep = os.environ.get("HF_ENDPOINT", "")
     if not ep:
@@ -136,6 +147,20 @@ def print_footer_embedding(target_dir: str) -> None:
     print("=" * 50)
 
 
+def _resolve_chat_allow_patterns(cfg: dict, qinfo: dict) -> list[str]:
+    if cfg.get("download_allow_patterns") is not None:
+        raw = cfg["download_allow_patterns"]
+        return raw if isinstance(raw, list) else [raw]
+    raw = qinfo.get("patterns")
+    if raw is not None:
+        return raw if isinstance(raw, list) else [raw]
+    pat = qinfo.get("pattern")
+    if pat is None:
+        print("错误: 量化配置须包含 pattern 或 patterns", file=sys.stderr)
+        sys.exit(1)
+    return [pat]
+
+
 def download_chat(
     model_name: str,
     cfg: dict,
@@ -148,7 +173,7 @@ def download_chat(
     if not qinfo:
         print(f"可用量化版本: {list(quants.keys())}", file=sys.stderr)
         sys.exit(1)
-    patterns = cfg.get("download_allow_patterns", [qinfo["pattern"]])
+    patterns = _resolve_chat_allow_patterns(cfg, qinfo)
     repo_id = cfg["repo_id"]
     mode = download_target_mode(cfg)
     rn = repo_name(cfg)
@@ -197,11 +222,13 @@ def download_chat(
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
         from huggingface_hub import snapshot_download
 
+        hf_xtra = _hf_revision_kwargs(cfg)
         print(f"开始下载 {repo_id} (模式: {patterns}) [HuggingFace]...")
         snapshot_download(
             repo_id=repo_id,
             local_dir=target_dir,
             allow_patterns=patterns,
+            **hf_xtra,
         )
 
     try:
@@ -261,7 +288,7 @@ def download_embedding(
         os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "0")
         from huggingface_hub import snapshot_download
 
-        kw2: dict = {"local_dir": target_dir}
+        kw2: dict = {"local_dir": target_dir, **_hf_revision_kwargs(cfg)}
         if patterns is not None:
             kw2["allow_patterns"] = patterns
         snapshot_download(repo_id=repo_id, **kw2)
@@ -289,14 +316,18 @@ def print_usage_list(models: dict) -> None:
     print("可用模型:")
     for name, cfg in models.items():
         if cfg.get("type") == "embedding":
-            print(f"  {name:15s} 类型: embedding（safetensors）")
+            ds = cfg.get("download_source") or ""
+            tag = f"  default_hub={ds}" if ds else ""
+            print(f"  {name:15s} 类型: embedding（safetensors）{tag}")
             continue
         if cfg.get("type") == "external":
             print(f"  {name:15s} 类型: external（不可 download）")
             continue
         quants = ", ".join((cfg.get("quants") or {}).keys())
         dq = cfg.get("default_quant") or ""
-        print(f"  {name:15s} 量化: {quants}  (默认: {dq})")
+        ds = cfg.get("download_source") or ""
+        hub = f"  hub={ds}" if ds else ""
+        print(f"  {name:15s} 量化: {quants}  (默认: {dq}){hub}")
 
 
 def main() -> None:
@@ -307,7 +338,8 @@ def main() -> None:
     parser.add_argument(
         "--source",
         choices=("modelscope", "huggingface"),
-        default=os.environ.get("DOWNLOAD_SOURCE", "modelscope"),
+        default=None,
+        help="覆盖 models.json 中的 download_source / 环境变量 DOWNLOAD_SOURCE",
     )
     parser.add_argument("--to", dest="to_path", default="")
     args = parser.parse_args()
@@ -326,6 +358,16 @@ def main() -> None:
     mtype = cfg.get("type") or "chat"
     to_path = args.to_path.strip() or None
 
+    src = args.source or cfg.get("download_source") or os.environ.get(
+        "DOWNLOAD_SOURCE", "modelscope"
+    )
+    if src not in ("modelscope", "huggingface"):
+        print(
+            f"\033[0;31m错误: 无效下载源 {src!r}（须为 modelscope / huggingface）\033[0m",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     if mtype == "external":
         print(
             f"\033[0;31m错误: {args.model_name} 为外部推理进程，勿使用本仓库 download\033[0m",
@@ -340,7 +382,7 @@ def main() -> None:
         if args.quant:
             print("\033[0;31m错误: embedding 模型不支持 --quant\033[0m", file=sys.stderr)
             sys.exit(1)
-        download_embedding(args.model_name, cfg, args.source, to_path)
+        download_embedding(args.model_name, cfg, src, to_path)
         return
 
     quants = cfg.get("quants") or {}
@@ -356,7 +398,7 @@ def main() -> None:
         print("\033[0;31m错误: 未指定量化且 models.json 无 default_quant\033[0m", file=sys.stderr)
         sys.exit(1)
 
-    download_chat(args.model_name, cfg, quant, args.source, to_path)
+    download_chat(args.model_name, cfg, quant, src, to_path)
 
 
 if __name__ == "__main__":

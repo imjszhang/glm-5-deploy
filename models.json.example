@@ -2,6 +2,7 @@
   "example-chat": {
     "full_model_name": "示例对话模型（请改名并改 repo_id）",
     "repo_id": "unsloth/Your-Model-GGUF",
+    "download_source": "modelscope",
     "default_quant": "Q4_K_M",
     "alias": "unsloth/Your-Model",
     "default_port": 8001,
@@ -24,6 +25,7 @@
   },
   "jina-embed": {
     "type": "embedding",
+    "download_source": "modelscope",
     "repo_id": "jinaai/jina-embeddings-v5-text-small",
     "repo_name": "jinaai-jina-embeddings-v5-text-small",
     "alias": "jina-embeddings-v5-text-small",
